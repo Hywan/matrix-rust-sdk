@@ -113,7 +113,7 @@ impl HttpClient {
         &self,
         request: Request,
         config: Option<RequestConfig>,
-        server_versions: Arc<[MatrixVersion]>,
+        server_versions: Arc<Vec<MatrixVersion>>,
     ) -> Result<Request::IncomingResponse, HttpError>
     where
         Request: OutgoingRequest + Debug,

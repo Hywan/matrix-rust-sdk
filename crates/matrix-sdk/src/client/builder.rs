@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use matrix_sdk_base::{locks::RwLock, store::StoreConfig, BaseClient, StateStore};
-use matrix_sdk_common::locks::Mutex;
 use ruma::{
     api::{client::discovery::discover_homeserver, error::FromHttpResponseError, MatrixVersion},
     OwnedServerName, ServerName, UserId,
@@ -63,7 +62,7 @@ pub struct ClientBuilder {
     request_config: RequestConfig,
     respect_login_well_known: bool,
     appservice_mode: bool,
-    server_versions: Option<Arc<[MatrixVersion]>>,
+    server_versions: Option<Arc<Vec<MatrixVersion>>>,
 }
 
 impl ClientBuilder {
@@ -252,7 +251,7 @@ impl ClientBuilder {
     ///
     /// This is helpful for test code that doesn't care to mock that endpoint.
     pub fn server_versions(mut self, value: impl IntoIterator<Item = MatrixVersion>) -> Self {
-        self.server_versions = Some(value.into_iter().collect());
+        self.server_versions = Some(Arc::new(value.into_iter().collect()));
         self
     }
 
@@ -309,7 +308,7 @@ impl ClientBuilder {
                     .send(
                         discover_homeserver::Request::new(),
                         None,
-                        [MatrixVersion::V1_0].into_iter().collect(),
+                        Arc::new([MatrixVersion::V1_0].into_iter().collect()),
                     )
                     .await
                     .map_err(|e| match e {
@@ -333,7 +332,7 @@ impl ClientBuilder {
             homeserver,
             http_client,
             base_client,
-            server_versions: Mutex::new(server_versions),
+            server_versions: server_versions.into(),
             #[cfg(feature = "encryption")]
             group_session_locks: Default::default(),
             #[cfg(feature = "encryption")]

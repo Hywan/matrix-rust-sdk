@@ -23,6 +23,7 @@ use std::{
 };
 
 use anymap2::any::CloneAnySendSync;
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use futures_core::stream::Stream;
 use matrix_sdk_base::{
@@ -129,7 +130,7 @@ pub(crate) struct ClientInner {
     /// User session data.
     pub(crate) base_client: BaseClient,
     /// The Matrix versions the server supports (well-known ones only)
-    server_versions: Mutex<Arc<[MatrixVersion]>>,
+    server_versions: ArcSwap<Vec<MatrixVersion>>,
     /// Locks making sure we only have one group session sharing request in
     /// flight per room.
     #[cfg(feature = "encryption")]
@@ -1486,18 +1487,17 @@ impl Client {
         self.inner.http_client.send(request, config, self.server_versions().await?).await
     }
 
-    async fn server_versions(&self) -> HttpResult<Arc<[MatrixVersion]>> {
-        let mut server_versions = self.inner.server_versions.lock().await;
-
+    async fn server_versions(&self) -> HttpResult<Arc<Vec<MatrixVersion>>> {
+        let server_versions = self.inner.server_versions.load();
         if server_versions.is_empty() {
             // Not initialized before
-            *server_versions = self
+            let mut server_versions: Vec<_> = self
                 .inner
                 .http_client
                 .send(
                     get_supported_versions::Request::new(),
                     None,
-                    [MatrixVersion::V1_0].into_iter().collect(),
+                    Arc::new([MatrixVersion::V1_0].into_iter().collect()),
                 )
                 .await?
                 .known_versions()
@@ -1505,11 +1505,14 @@ impl Client {
 
             if server_versions.is_empty() {
                 // No known versions, fall back to v1.0 (r0 paths)
-                *server_versions = vec![MatrixVersion::V1_0].into();
+                server_versions = vec![MatrixVersion::V1_0];
             }
-        }
 
-        Ok(server_versions.clone())
+            self.inner.server_versions.store(Arc::new(server_versions));
+            Ok(self.inner.server_versions.load().clone())
+        } else {
+            Ok(server_versions.clone())
+        }
     }
 
     /// Get information of all our own devices.
