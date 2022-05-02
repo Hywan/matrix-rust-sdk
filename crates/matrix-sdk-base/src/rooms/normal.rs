@@ -251,7 +251,7 @@ impl Room {
 
     /// Get the `m.room.tombstone` content of this room if there is one.
     pub fn tombstone(&self) -> Option<RoomTombstoneEventContent> {
-        self.inner.read().unwrap().base_info.tombstone.clone()
+        self.inner.read().unwrap().tombstone().cloned()
     }
 
     /// Get the topic of the room.
@@ -753,5 +753,9 @@ impl RoomInfo {
 
     fn name(&self) -> Option<&str> {
         Some(self.base_info.name.as_ref()?.as_original()?.content.name.as_ref()?.as_ref())
+    }
+
+    fn tombstone(&self) -> Option<&RoomTombstoneEventContent> {
+        Some(&self.base_info.tombstone.as_ref()?.as_original()?.content)
     }
 }
