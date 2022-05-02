@@ -13,7 +13,7 @@ use ruma::{
             guest_access::RoomGuestAccessEventContent,
             history_visibility::RoomHistoryVisibilityEventContent,
             join_rules::RoomJoinRulesEventContent, name::RoomNameEventContent,
-            tombstone::RoomTombstoneEventContent,
+            tombstone::RoomTombstoneEventContent, topic::RoomTopicEventContent,
         },
         AnyStrippedStateEvent, AnySyncStateEvent, EmptyStateKey, RedactContent,
         RedactedEventContent, StateEventContent, StrippedStateEvent, SyncStateEvent,
@@ -134,7 +134,7 @@ pub struct BaseRoomInfo {
     /// The `m.room.tombstone` event content of this room.
     tombstone: Option<MinimalStateEvent<RoomTombstoneEventContent>>,
     /// The topic of this room.
-    pub(crate) topic: Option<String>,
+    topic: Option<MinimalStateEvent<RoomTopicEventContent>>,
 }
 
 impl BaseRoomInfo {
@@ -187,7 +187,7 @@ impl BaseRoomInfo {
                 self.canonical_alias = Some(a.into());
             }
             AnySyncStateEvent::RoomTopic(t) => {
-                self.topic = t.as_original().map(|t| t.content.topic.clone());
+                self.topic = Some(t.into());
             }
             AnySyncStateEvent::RoomTombstone(t) => {
                 self.tombstone = Some(t.into());
@@ -236,7 +236,7 @@ impl BaseRoomInfo {
                 self.canonical_alias = Some(a.into());
             }
             AnyStrippedStateEvent::RoomTopic(t) => {
-                self.topic = Some(t.content.topic.clone());
+                self.topic = Some(t.into());
             }
             AnyStrippedStateEvent::RoomTombstone(t) => {
                 self.tombstone = Some(t.into());

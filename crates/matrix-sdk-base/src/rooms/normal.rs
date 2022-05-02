@@ -256,7 +256,7 @@ impl Room {
 
     /// Get the topic of the room.
     pub fn topic(&self) -> Option<String> {
-        self.inner.read().unwrap().base_info.topic.clone()
+        self.inner.read().unwrap().topic().map(ToOwned::to_owned)
     }
 
     /// Calculate the canonical display name of the room, taking into account
@@ -757,5 +757,9 @@ impl RoomInfo {
 
     fn tombstone(&self) -> Option<&RoomTombstoneEventContent> {
         Some(&self.base_info.tombstone.as_ref()?.as_original()?.content)
+    }
+
+    fn topic(&self) -> Option<&str> {
+        Some(&self.base_info.topic.as_ref()?.as_original()?.content.topic)
     }
 }
