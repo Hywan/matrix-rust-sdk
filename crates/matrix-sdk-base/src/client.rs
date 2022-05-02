@@ -51,8 +51,12 @@ use ruma::{
     api::client::{self as api, push::get_notifications::v3::Notification},
     events::{
         push_rules::PushRulesEvent,
-        room::member::{
-            MembershipState, OriginalSyncRoomMemberEvent, RoomMemberEvent, StrippedRoomMemberEvent,
+        room::{
+            member::{
+                MembershipState, OriginalSyncRoomMemberEvent, RoomMemberEvent,
+                StrippedRoomMemberEvent,
+            },
+            redaction::SyncRoomRedactionEvent,
         },
         AnyGlobalAccountDataEvent, AnyRoomAccountDataEvent, AnyStrippedStateEvent,
         AnySyncEphemeralRoomEvent, AnySyncRoomEvent, AnySyncStateEvent, GlobalAccountDataEventType,
@@ -315,6 +319,17 @@ impl BaseClient {
                             }
                         },
 
+                        AnySyncRoomEvent::MessageLike(AnySyncMessageLikeEvent::RoomRedaction(
+                            // Redacted redactions don't have the `redacts` key, so we can't know
+                            // what they were meant to redact. A future room version might move the
+                            // redacts key, replace the current redaction event altogether, or have
+                            // the redacts key survive redaction.
+                            SyncRoomRedactionEvent::Original(r),
+                        )) => {
+                            room_info.handle_redaction(r);
+                            // FIXME: Add to changes somehow?
+                        }
+
                         #[cfg(feature = "encryption")]
                         AnySyncRoomEvent::MessageLike(e) => match e {
                             AnySyncMessageLikeEvent::RoomEncrypted(
@@ -343,6 +358,7 @@ impl BaseClient {
                             }
                             _ => (),
                         },
+
                         #[cfg(not(feature = "encryption"))]
                         _ => (),
                     }
