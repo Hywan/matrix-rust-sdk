@@ -43,7 +43,7 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use super::{BaseRoomInfo, RoomMember};
+use super::{BaseRoomInfo, MinimalStateEvent, RoomMember};
 use crate::{
     deserialized_responses::{SyncRoomEvent, TimelineSlice, UnreadNotificationsCount},
     store::{Result as StoreResult, StateStore},
@@ -139,10 +139,7 @@ impl Room {
 
     /// Whether this room's [`RoomType`](CreateRoomType) is `m.space`.
     pub fn is_space(&self) -> bool {
-        match self.inner.read().unwrap().base_info.create.as_ref() {
-            Some(create) => create.room_type == Some(CreateRoomType::Space),
-            None => false,
-        }
+        self.inner.read().unwrap().room_type().map_or(false, |t| *t == CreateRoomType::Space)
     }
 
     /// Get the unread notification counts.
@@ -181,8 +178,11 @@ impl Room {
     /// This usually isn't optional but some servers might not send an
     /// `m.room.create` event as the first event for a given room, thus this can
     /// be optional.
+    ///
+    /// It can also be redacted in current room versions, leaving only the
+    /// `creator` field.
     pub fn create_content(&self) -> Option<RoomCreateEventContent> {
-        self.inner.read().unwrap().base_info.create.clone()
+        Some(self.inner.read().unwrap().base_info.create.as_ref()?.as_original()?.content.clone())
     }
 
     /// Is this room considered a direct message.
@@ -406,15 +406,8 @@ impl Room {
             self.store.get_presence_event(user_id).await?.and_then(|e| e.deserialize().ok());
         let profile = self.store.get_profile(self.room_id(), user_id).await?;
         let max_power_level = self.max_power_level();
-        let is_room_creator = self
-            .inner
-            .read()
-            .unwrap()
-            .base_info
-            .create
-            .as_ref()
-            .map(|c| c.creator == user_id)
-            .unwrap_or(false);
+        let is_room_creator =
+            self.inner.read().unwrap().creator().map(|c| c == user_id).unwrap_or(false);
 
         let power =
             self.store
@@ -722,6 +715,18 @@ impl RoomInfo {
 
     /// Get the room version of this room.
     pub fn room_version(&self) -> Option<&RoomVersionId> {
-        self.base_info.create.as_ref().map(|c| &c.room_version)
+        Some(&self.base_info.create.as_ref()?.as_original()?.content.room_version)
+    }
+
+    /// Get the room type of this room.
+    pub fn room_type(&self) -> Option<&CreateRoomType> {
+        self.base_info.create.as_ref()?.as_original()?.content.room_type.as_ref()
+    }
+
+    fn creator(&self) -> Option<&UserId> {
+        Some(match self.base_info.create.as_ref()? {
+            MinimalStateEvent::Original(ev) => &ev.content.creator,
+            MinimalStateEvent::Redacted(ev) => &ev.content.creator,
+        })
     }
 }
