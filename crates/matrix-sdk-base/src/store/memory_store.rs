@@ -354,9 +354,7 @@ impl MemoryStore {
             let make_room_version = || {
                 self.room_info
                     .get(room)
-                    .and_then(|info| {
-                        info.base_info.create.as_ref().map(|event| event.room_version.clone())
-                    })
+                    .and_then(|info| info.room_version().cloned())
                     .unwrap_or_else(|| {
                         warn!("Unable to find the room version for {}, assume version 9", room);
                         RoomVersionId::V9
