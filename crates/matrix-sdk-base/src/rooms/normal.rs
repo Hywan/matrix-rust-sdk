@@ -241,7 +241,7 @@ impl Room {
 
     /// Get the `m.room.name` of this room.
     pub fn name(&self) -> Option<String> {
-        self.inner.read().unwrap().base_info.name.clone()
+        self.inner.read().unwrap().name().map(ToOwned::to_owned)
     }
 
     /// Has the room been tombstoned.
@@ -331,7 +331,7 @@ impl Room {
         let summary = {
             let inner = self.inner.read().unwrap();
 
-            if let Some(name) = &inner.base_info.name {
+            if let Some(name) = &inner.name() {
                 let name = name.trim();
                 return Ok(name.to_owned());
             } else if let Some(alias) = inner.canonical_alias() {
@@ -749,5 +749,9 @@ impl RoomInfo {
             Some(MinimalStateEvent::Original(ev)) => &ev.content.join_rule,
             _ => &JoinRule::Public,
         }
+    }
+
+    fn name(&self) -> Option<&str> {
+        Some(self.base_info.name.as_ref()?.as_original()?.content.name.as_ref()?.as_ref())
     }
 }
