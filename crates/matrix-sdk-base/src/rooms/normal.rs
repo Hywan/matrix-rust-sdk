@@ -37,8 +37,8 @@ use ruma::{
     },
     receipt::ReceiptType,
     room::RoomType as CreateRoomType,
-    EventId, OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedUserId, RoomId, RoomVersionId,
-    UserId,
+    EventId, OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedUserId, RoomAliasId, RoomId,
+    RoomVersionId, UserId,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -173,7 +173,7 @@ impl Room {
 
     /// Get the canonical alias of this room.
     pub fn canonical_alias(&self) -> Option<OwnedRoomAliasId> {
-        self.inner.read().unwrap().base_info.canonical_alias.clone()
+        self.inner.read().unwrap().canonical_alias().map(ToOwned::to_owned)
     }
 
     /// Get the `m.room.create` content of this room.
@@ -334,7 +334,7 @@ impl Room {
             if let Some(name) = &inner.base_info.name {
                 let name = name.trim();
                 return Ok(name.to_owned());
-            } else if let Some(alias) = &inner.base_info.canonical_alias {
+            } else if let Some(alias) = inner.canonical_alias() {
                 let alias = alias.alias().trim();
                 return Ok(alias.to_owned());
             }
@@ -708,6 +708,11 @@ impl RoomInfo {
     /// The return value is saturated at `u64::MAX`.
     pub fn active_members_count(&self) -> u64 {
         self.summary.joined_member_count.saturating_add(self.summary.invited_member_count)
+    }
+
+    /// Get the canonical alias of this room.
+    pub fn canonical_alias(&self) -> Option<&RoomAliasId> {
+        self.base_info.canonical_alias.as_ref()?.as_original()?.content.alias.as_deref()
     }
 
     /// Get the room ID of this room.
