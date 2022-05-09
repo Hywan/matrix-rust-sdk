@@ -75,6 +75,3 @@ tokio = { version = "1.7.0", default-features = false, features = ["macros", "rt
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.2.6", features = ["js"] }
 wasm-bindgen-test = "0.3.24"
-
-[profile.release]
-lto = true
