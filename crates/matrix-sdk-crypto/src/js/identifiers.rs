@@ -17,7 +17,7 @@ impl UserId {
     /// Parse/validate and create a new `UserId`.
     #[wasm_bindgen(constructor)]
     pub fn new(id: &str) -> Result<UserId, JsError> {
-        Ok(Self { inner: ruma::UserId::parse(id).map_err(Into::<JsError>::into)? })
+        Ok(Self { inner: ruma::UserId::parse(id)? })
     }
 
     /// Returns the user's localpart.
