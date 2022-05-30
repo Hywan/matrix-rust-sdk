@@ -3,11 +3,8 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use js_sys::{Array, Map, Promise, Set};
-use ruma::{
-    events::{AnyMessageLikeEventContent, EventContent},
-    DeviceKeyAlgorithm, OwnedTransactionId, UInt,
-};
-use serde_json::value::RawValue as RawJsonValue;
+use ruma::{DeviceKeyAlgorithm, OwnedTransactionId, UInt};
+use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
 
 use crate::{
@@ -250,17 +247,17 @@ impl OlmMachine {
     pub fn encrypt_room_event(
         &self,
         room_id: &identifiers::RoomId,
-        event_type: &str,
+        event_type: String,
         content: &str,
     ) -> Result<Promise, JsError> {
         let room_id = room_id.inner.clone();
-        let content: Box<RawJsonValue> = serde_json::from_str(content)?;
-        let content = AnyMessageLikeEventContent::from_parts(event_type, &content)?;
-
+        let content: JsonValue = serde_json::from_str(content)?;
         let me = self.inner.clone();
 
         Ok(future_to_promise(async move {
-            Ok(serde_json::to_string(&me.encrypt_room_event(&room_id, content).await?)?)
+            Ok(serde_json::to_string(
+                &me.encrypt_room_event_raw(&room_id, content, event_type.as_ref()).await?,
+            )?)
         }))
     }
 
