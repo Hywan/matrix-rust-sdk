@@ -16,9 +16,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![warn(missing_docs, missing_debug_implementations)]
 
-#[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
-compile_error!("This crate is designed to only be compiled to `wasm32-unknown-unknown`.");
-
 pub mod events;
 mod future;
 pub mod identifiers;
