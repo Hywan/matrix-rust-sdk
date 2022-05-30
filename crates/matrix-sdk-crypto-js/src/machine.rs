@@ -16,7 +16,7 @@ use crate::{
     identifiers, requests,
     requests::OutgoingRequest,
     responses::{self, response_from_string},
-    sync_events, verifications,
+    sync_events,
 };
 
 /// State machine implementation of the Olm/Megolm encryption protocol
