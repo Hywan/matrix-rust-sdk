@@ -1,4 +1,4 @@
-//! Different verification types.
+9//! Different verification types.
 
 use js_sys::{Array, JsString};
 use ruma::events::key::verification::cancel::CancelCode as RumaCancelCode;
@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::identifiers::{DeviceId, RoomId, UserId};
 
-/// Short Authentification String (SAS) verification.
+/// Short Authentication String (SAS) verification.
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Sas {
