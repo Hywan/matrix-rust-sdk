@@ -26,7 +26,6 @@ pub mod machine;
 pub mod requests;
 pub mod responses;
 pub mod sync_events;
-pub mod verifications;
 
 use js_sys::{Object, Reflect};
 use wasm_bindgen::{convert::RefFromWasmAbi, prelude::*};
