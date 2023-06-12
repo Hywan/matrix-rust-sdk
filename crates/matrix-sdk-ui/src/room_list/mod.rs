@@ -60,6 +60,8 @@
 //! [`RoomList::state_stream`] provides a way to get a stream of the state
 //! machine's state, which can be pretty helpful for the client app.
 
+mod filters;
+
 use std::{future::ready, sync::Arc};
 
 use async_once_cell::OnceCell as AsyncOnceCell;
@@ -67,6 +69,7 @@ use async_stream::stream;
 use async_trait::async_trait;
 use eyeball::shared::Observable;
 use eyeball_im::VectorDiff;
+pub use filters::*;
 use futures_util::{pin_mut, Stream, StreamExt};
 use imbl::Vector;
 pub use matrix_sdk::RoomListEntry;

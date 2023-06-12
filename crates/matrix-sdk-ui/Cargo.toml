@@ -11,7 +11,12 @@ e2e-encryption = ["matrix-sdk/e2e-encryption"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
-experimental-room-list = ["experimental-sliding-sync", "dep:async-stream", "dep:eyeball-im-util"]
+experimental-room-list = [
+  "experimental-sliding-sync",
+  "dep:async-stream",
+  "dep:eyeball-im-util",
+  "dep:fuzzy-matcher",
+]
 experimental-sliding-sync = ["matrix-sdk/experimental-sliding-sync"]
 
 testing = ["dep:eyeball-im-util"]
@@ -27,6 +32,7 @@ eyeball-im = { workspace = true }
 eyeball-im-util = { workspace = true, optional = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
+fuzzy-matcher = { version = "0.3.7", optional = true }
 imbl = { version = "2.0.0", features = ["serde"] }
 indexmap = "1.9.1"
 matrix-sdk = { version = "0.6.2", path = "../matrix-sdk", default-features = false }
