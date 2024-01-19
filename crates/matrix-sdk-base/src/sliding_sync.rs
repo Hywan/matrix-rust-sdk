@@ -220,8 +220,7 @@ impl BaseClient {
                 .push(raw.clone().cast());
         }
 
-        // Handles the remaining rooms account data not handled by
-        // process_sliding_sync_room.
+        // Handle room account data
         for (room_id, raw) in &rooms_account_data {
             self.handle_room_account_data(room_id, raw, &mut changes).await;
 
@@ -358,13 +357,6 @@ impl BaseClient {
             .await?;
         }
 
-        let room_account_data = if let Some(events) = rooms_account_data.remove(room_id) {
-            self.handle_room_account_data(room_id, &events, changes).await;
-            Some(events)
-        } else {
-            None
-        };
-
         process_room_properties(room_data, &mut room_info);
 
         let timeline = self
@@ -407,6 +399,8 @@ impl BaseClient {
 
         let notification_count = room_data.unread_notifications.clone().into();
         room_info.update_notification_count(notification_count);
+
+        let room_account_data = rooms_account_data.get(room_id).cloned();
 
         match room_info.state() {
             RoomState::Joined => {
