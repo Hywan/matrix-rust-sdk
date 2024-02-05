@@ -696,8 +696,7 @@ fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut Room
     }
 
     // Sliding sync doesn't have a room summary, nevertheless it contains the joined
-    // and invited member counts. It likely will never have a heroes concept since
-    // it calculates the room display name for us.
+    // and invited member counts.
     //
     // Let's at least fetch the member counts, since they might be useful.
     let mut room_summary = RoomSummary::new();
