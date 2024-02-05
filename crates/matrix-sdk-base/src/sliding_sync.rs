@@ -704,6 +704,7 @@ fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut Room
     room_summary.joined_member_count = room_data.joined_count;
     room_info.update_summary(&room_summary);
 
+    // Update the `prev_batch`.
     room_info.set_prev_batch(room_data.prev_batch.as_deref());
 
     if room_data.limited {
