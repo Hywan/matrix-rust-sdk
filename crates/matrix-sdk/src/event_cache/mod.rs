@@ -838,17 +838,9 @@ mod tests {
     use matrix_sdk_common::executor::spawn;
     use matrix_sdk_test::{async_test, sync_timeline_event};
     use ruma::room_id;
-    use serde_json::json;
-    use wiremock::{
-        matchers::{header, method, path_regex, query_param},
-        Mock, ResponseTemplate,
-    };
 
     use super::{BackPaginationOutcome, EventCacheError};
-    use crate::{
-        event_cache::store::PaginationToken,
-        test_utils::{logged_in_client, logged_in_client_with_server},
-    };
+    use crate::{event_cache::store::PaginationToken, test_utils::logged_in_client};
 
     #[async_test]
     async fn test_must_explicitly_subscribe() {
@@ -866,51 +858,57 @@ mod tests {
         assert_matches!(result, Err(EventCacheError::NotSubscribedYet));
     }
 
-    #[async_test]
-    async fn test_unknown_pagination_token() {
-        let (client, server) = logged_in_client_with_server().await;
-
-        let room_id = room_id!("!galette:saucisse.bzh");
-        client.base_client().get_or_create_room(room_id, matrix_sdk_base::RoomState::Joined);
-
-        client.event_cache().subscribe().unwrap();
-
-        let (room_event_cache, _drop_handles) =
-            client.event_cache().for_room(room_id).await.unwrap();
-        let room_event_cache = room_event_cache.unwrap();
-
-        // If I try to back-paginate with an unknown back-pagination token,
-        let token_name = "unknown";
-        let token = PaginationToken(token_name.to_owned());
-
-        // Then I run into an error.
-        Mock::given(method("GET"))
-            .and(path_regex(r"^/_matrix/client/r0/rooms/.*/messages$"))
-            .and(header("authorization", "Bearer 1234"))
-            .and(query_param("from", token_name))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "start": token_name,
-                "chunk": [],
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let res = room_event_cache.backpaginate(20, Some(token)).await;
-        assert_matches!(res, Ok(BackPaginationOutcome::UnknownBackpaginationToken));
-
-        server.verify().await
-    }
-
     // Those tests require time to work, and it does not on wasm32.
     #[cfg(not(target_arch = "wasm32"))]
     mod time_tests {
         use std::time::{Duration, Instant};
 
         use matrix_sdk_base::RoomState;
+        use serde_json::json;
         use tokio::time::sleep;
+        use wiremock::{
+            matchers::{header, method, path_regex, query_param},
+            Mock, ResponseTemplate,
+        };
 
         use super::{super::store::Gap, *};
+        use crate::test_utils::logged_in_client_with_server;
+
+        #[async_test]
+        async fn test_unknown_pagination_token() {
+            let (client, server) = logged_in_client_with_server().await;
+
+            let room_id = room_id!("!galette:saucisse.bzh");
+            client.base_client().get_or_create_room(room_id, matrix_sdk_base::RoomState::Joined);
+
+            client.event_cache().subscribe().unwrap();
+
+            let (room_event_cache, _drop_handles) =
+                client.event_cache().for_room(room_id).await.unwrap();
+            let room_event_cache = room_event_cache.unwrap();
+
+            // If I try to back-paginate with an unknown back-pagination token,
+            let token_name = "unknown";
+            let token = PaginationToken(token_name.to_owned());
+
+            // Then I run into an error.
+            Mock::given(method("GET"))
+                .and(path_regex(r"^/_matrix/client/r0/rooms/.*/messages$"))
+                .and(header("authorization", "Bearer 1234"))
+                .and(query_param("from", token_name))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "start": token_name,
+                    "chunk": [],
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let res = room_event_cache.backpaginate(20, Some(token)).await;
+            assert_matches!(res, Ok(BackPaginationOutcome::UnknownBackpaginationToken));
+
+            server.verify().await
+        }
 
         #[async_test]
         async fn test_wait_no_pagination_token() {
