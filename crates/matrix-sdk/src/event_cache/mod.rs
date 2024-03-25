@@ -538,7 +538,7 @@ impl RoomEventCacheInner {
 
         // Push the new events.
         self.append_events_locked_impl(
-            Some(room_events),
+            room_events,
             events,
             prev_batch,
             account_data,
@@ -558,9 +558,8 @@ impl RoomEventCacheInner {
         ephemeral: Vec<Raw<AnySyncEphemeralRoomEvent>>,
         ambiguity_changes: BTreeMap<OwnedEventId, AmbiguityChange>,
     ) -> Result<()> {
-        // Push the new events.
         self.append_events_locked_impl(
-            None,
+            self.events.write().await,
             events,
             prev_batch,
             account_data,
@@ -577,7 +576,7 @@ impl RoomEventCacheInner {
     /// This is a private implementation. It must not be exposed publicly.
     async fn append_events_locked_impl(
         &self,
-        room_events: Option<RwLockWriteGuard<'_, RoomEvents>>,
+        mut room_events: RwLockWriteGuard<'_, RoomEvents>,
         events: Vec<SyncTimelineEvent>,
         prev_batch: Option<String>,
         account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
@@ -592,11 +591,6 @@ impl RoomEventCacheInner {
         {
             return Ok(());
         }
-
-        let mut room_events = match room_events {
-            Some(room_events) => room_events,
-            None => self.events.write().await,
-        };
 
         // Add the previous back-pagination token (if present), followed by the timeline
         // events themselves.
