@@ -25,6 +25,38 @@ use std::{
     },
 };
 
+pub trait LinkedChunkListener: Send + Sync {
+    type Error;
+
+    async fn new_chunk(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn remove_chunk(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn insert_items(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn remove_items(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn insert_gap(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn remove_gap(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl LinkedChunkListener for () {
+    type Error = ();
+}
+
 /// Errors of [`LinkedChunk`].
 #[derive(Debug)]
 pub enum LinkedChunkError {
@@ -40,7 +72,7 @@ pub enum LinkedChunkError {
 /// instead of a single one. A chunk has a maximum capacity of `CHUNK_CAPACITY`.
 /// Once a chunk is full, a new chunk is created. Not all chunks are necessarily
 /// entirely full. A chunk can represents a `Gap` between other chunks.
-pub struct LinkedChunk<const CHUNK_CAPACITY: usize, Item, Gap> {
+pub struct LinkedChunk<const CHUNK_CAPACITY: usize, Item, Gap, Listener = ()> {
     /// The first chunk.
     first: NonNull<Chunk<CHUNK_CAPACITY, Item, Gap>>,
     /// The last chunk.
@@ -49,6 +81,9 @@ pub struct LinkedChunk<const CHUNK_CAPACITY: usize, Item, Gap> {
     length: usize,
     /// The generator of chunk identifiers.
     chunk_identifier_generator: ChunkIdentifierGenerator,
+    /// Listener, i.e. a type that will receive updates from what's happening
+    /// inside the `LinkedChunk`.
+    listener: Listener,
     /// Marker.
     marker: PhantomData<Box<Chunk<CHUNK_CAPACITY, Item, Gap>>>,
 }
@@ -56,19 +91,30 @@ pub struct LinkedChunk<const CHUNK_CAPACITY: usize, Item, Gap> {
 impl<const CAP: usize, Item, Gap> LinkedChunk<CAP, Item, Gap> {
     /// Create a new [`Self`].
     pub fn new() -> Self {
+        Self::new_with_listener(())
+    }
+
+    /// Get the number of items in this linked chunk.
+    pub fn len(&self) -> usize {
+        self.length
+    }
+}
+
+impl<const CAP: usize, Item, Gap, Listener> LinkedChunk<CAP, Item, Gap, Listener>
+where
+    Listener: LinkedChunkListener,
+{
+    /// Create a new [`Self`] with a listener.
+    pub fn new_with_listener(listener: Listener) -> Self {
         Self {
             // INVARIANT: The first chunk must always be an Items, not a Gap.
             first: Chunk::new_items_leaked(ChunkIdentifierGenerator::FIRST_IDENTIFIER),
             last: None,
             length: 0,
             chunk_identifier_generator: ChunkIdentifierGenerator::new_from_scratch(),
+            listener,
             marker: PhantomData,
         }
-    }
-
-    /// Get the number of items in this linked chunk.
-    pub fn len(&self) -> usize {
-        self.length
     }
 
     /// Push items at the end of the [`LinkedChunk`], i.e. on the last
@@ -511,7 +557,7 @@ impl<const CAP: usize, Item, Gap> LinkedChunk<CAP, Item, Gap> {
     }
 }
 
-impl<const CAP: usize, Item, Gap> Drop for LinkedChunk<CAP, Item, Gap> {
+impl<const CAP: usize, Item, Gap, Listener> Drop for LinkedChunk<CAP, Item, Gap, Listener> {
     fn drop(&mut self) {
         // Take the latest chunk.
         let mut current_chunk_ptr = self.last.or(Some(self.first));
@@ -933,7 +979,7 @@ where
             .field("first (deref)", unsafe { self.first.as_ref() })
             .field("last", &self.last)
             .field("length", &self.length)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
