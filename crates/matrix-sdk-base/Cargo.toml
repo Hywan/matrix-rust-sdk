@@ -26,6 +26,7 @@ experimental-sliding-sync = [
     "ruma/unstable-msc3575",
     "ruma/unstable-simplified-msc3575",
 ]
+experimental-simplified-sliding-sync = ["experimental-sliding-sync"]
 uniffi = ["dep:uniffi", "matrix-sdk-crypto?/uniffi"]
 
 # helpers for testing features build upon this

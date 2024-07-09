@@ -59,6 +59,10 @@ experimental-sliding-sync = [
     "matrix-sdk-base/experimental-sliding-sync",
     "reqwest/gzip",
 ]
+experimental-simplified-sliding-sync = [
+    "experimental-sliding-sync",
+    "matrix-sdk-base/experimental-simplified-sliding-sync",
+]
 experimental-widgets = ["dep:language-tags", "dep:uuid"]
 
 docsrs = ["e2e-encryption", "sqlite", "indexeddb", "sso-login", "qrcode", "image-proc"]
