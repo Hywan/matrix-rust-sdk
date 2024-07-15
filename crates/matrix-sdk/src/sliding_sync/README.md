@@ -1,4 +1,4 @@
-simplified_Sliding Sync Client implementation of [MSC3575][MSC] & extensions
+Sliding Sync Client implementation of [MSC3575][MSC] & extensions
 
 [`Sliding Sync`][MSC] is the third generation synchronization mechanism of
 Matrix with a strong focus on bandwidth efficiency. This is made possible by
