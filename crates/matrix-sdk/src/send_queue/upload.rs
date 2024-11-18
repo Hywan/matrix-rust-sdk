@@ -167,7 +167,7 @@ impl RoomSendQueue {
             let client = room.client();
             let cache_store = client
                 .event_cache_store()
-                .lock()
+                .lock_unchecked()
                 .await
                 .map_err(RoomSendQueueStorageError::LockError)?;
 
@@ -301,7 +301,7 @@ impl QueueStorage {
 
             let cache_store = client
                 .event_cache_store()
-                .lock()
+                .lock_unchecked()
                 .await
                 .map_err(RoomSendQueueStorageError::LockError)?;
 

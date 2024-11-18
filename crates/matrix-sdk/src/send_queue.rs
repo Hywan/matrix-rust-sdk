@@ -706,7 +706,7 @@ impl RoomSendQueue {
                     let data = room
                         .client()
                         .event_cache_store()
-                        .lock()
+                        .lock_unchecked()
                         .await?
                         .get_media_content(&cache_key)
                         .await?
@@ -1321,58 +1321,57 @@ impl QueueStorage {
                 })
             });
 
-        let reactions_and_medias = store
-            .load_dependent_queued_requests(&self.room_id)
-            .await?
-            .into_iter()
-            .filter_map(|dep| match dep.kind {
-                DependentQueuedRequestKind::EditEvent { .. }
-                | DependentQueuedRequestKind::RedactEvent => {
-                    // TODO: reflect local edits/redacts too?
-                    None
-                }
+        let reactions_and_medias =
+            store.load_dependent_queued_requests(&self.room_id).await?.into_iter().filter_map(
+                |dep| match dep.kind {
+                    DependentQueuedRequestKind::EditEvent { .. }
+                    | DependentQueuedRequestKind::RedactEvent => {
+                        // TODO: reflect local edits/redacts too?
+                        None
+                    }
 
-                DependentQueuedRequestKind::ReactEvent { key } => Some(LocalEcho {
-                    transaction_id: dep.own_transaction_id.clone().into(),
-                    content: LocalEchoContent::React {
-                        key,
-                        send_handle: SendReactionHandle {
-                            room: room.clone(),
-                            transaction_id: dep.own_transaction_id,
-                        },
-                        applies_to: dep.parent_transaction_id,
-                    },
-                }),
-
-                DependentQueuedRequestKind::UploadFileWithThumbnail { .. } => {
-                    // Don't reflect these: only the associated event is interesting to observers.
-                    None
-                }
-
-                DependentQueuedRequestKind::FinishUpload {
-                    local_echo,
-                    file_upload,
-                    thumbnail_info,
-                } => {
-                    // Materialize as an event local echo.
-                    Some(LocalEcho {
+                    DependentQueuedRequestKind::ReactEvent { key } => Some(LocalEcho {
                         transaction_id: dep.own_transaction_id.clone().into(),
-                        content: LocalEchoContent::Event {
-                            serialized_event: SerializableEventContent::new(&local_echo.into())
-                                .ok()?,
-                            send_handle: SendHandle {
+                        content: LocalEchoContent::React {
+                            key,
+                            send_handle: SendReactionHandle {
                                 room: room.clone(),
-                                transaction_id: dep.own_transaction_id.into(),
-                                media_handles: Some(MediaHandles {
-                                    upload_thumbnail_txn: thumbnail_info.map(|info| info.txn),
-                                    upload_file_txn: file_upload,
-                                }),
+                                transaction_id: dep.own_transaction_id,
                             },
-                            send_error: None,
+                            applies_to: dep.parent_transaction_id,
                         },
-                    })
-                }
-            });
+                    }),
+
+                    DependentQueuedRequestKind::UploadFileWithThumbnail { .. } => {
+                        // Don't reflect these: only the associated event is interesting to observers.
+                        None
+                    }
+
+                    DependentQueuedRequestKind::FinishUpload {
+                        local_echo,
+                        file_upload,
+                        thumbnail_info,
+                    } => {
+                        // Materialize as an event local echo.
+                        Some(LocalEcho {
+                            transaction_id: dep.own_transaction_id.clone().into(),
+                            content: LocalEchoContent::Event {
+                                serialized_event: SerializableEventContent::new(&local_echo.into())
+                                    .ok()?,
+                                send_handle: SendHandle {
+                                    room: room.clone(),
+                                    transaction_id: dep.own_transaction_id.into(),
+                                    media_handles: Some(MediaHandles {
+                                        upload_thumbnail_txn: thumbnail_info.map(|info| info.txn),
+                                        upload_file_txn: file_upload,
+                                    }),
+                                },
+                                send_error: None,
+                            },
+                        })
+                    }
+                },
+            );
 
         Ok(local_requests.chain(reactions_and_medias).collect())
     }
