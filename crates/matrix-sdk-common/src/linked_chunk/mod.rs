@@ -835,10 +835,8 @@ impl<const CAP: usize, Item, Gap> LinkedChunk<CAP, Item, Gap> {
     /// been constructed with [`Self::new`], otherwise, if it's been constructed
     /// with [`Self::new_with_update_history`], it returns `Some(…)`.
     pub fn as_vector(&mut self) -> Option<AsVector<Item, Gap>> {
-        let (updates, token) = self
-            .updates
-            .as_mut()
-            .map(|updates| (updates.inner.clone(), updates.new_reader_token()))?;
+        let (updates, token) =
+            self.updates().map(|updates| (updates.inner.clone(), updates.new_reader_token()))?;
         let chunk_iterator = self.chunks();
 
         Some(AsVector::new(updates, token, chunk_iterator))
