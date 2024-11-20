@@ -44,12 +44,12 @@ impl Default for RoomEvents {
 impl RoomEvents {
     /// Build a new [`RoomEvents`] struct with zero events.
     pub fn new() -> Self {
-        Self { chunks: LinkedChunk::new(), deduplicator: Deduplicator::new() }
+        Self { chunks: LinkedChunk::new_with_update_history(), deduplicator: Deduplicator::new() }
     }
 
     /// Clear all events.
     pub fn reset(&mut self) {
-        self.chunks = LinkedChunk::new();
+        self.chunks = LinkedChunk::new_with_update_history();
     }
 
     /// Push events after all events or gaps.
