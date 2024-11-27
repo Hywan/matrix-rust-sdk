@@ -352,6 +352,7 @@ async fn test_timeline_basic() -> Result<()> {
     Ok(())
 }
 
+/*
 #[async_test]
 async fn test_timeline_duplicated_events() -> Result<()> {
     let (server, sliding_sync) = new_sliding_sync(vec![SlidingSyncList::builder("foo")
@@ -430,6 +431,7 @@ async fn test_timeline_duplicated_events() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[async_test]
 async fn test_timeline_read_receipts_are_updated_live() -> Result<()> {

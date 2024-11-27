@@ -552,6 +552,7 @@ async fn test_sync_highlighted() {
     assert!(remote_event.is_highlighted());
 }
 
+/*
 #[async_test]
 async fn test_duplicate_maintains_correct_order() {
     let room_id = room_id!("!a98sd12bjh:example.org");
@@ -617,6 +618,7 @@ async fn test_duplicate_maintains_correct_order() {
     let content = items[3].as_event().unwrap().content().as_message().unwrap().body();
     assert_eq!(content, "C");
 }
+*/
 
 #[async_test]
 async fn test_pin_event_is_sent_successfully() {

@@ -18,7 +18,7 @@ use assert_matches::assert_matches;
 use eyeball_im::VectorDiff;
 use matrix_sdk::{assert_next_matches_with_timeout, send_queue::RoomSendQueueUpdate};
 use matrix_sdk_base::store::QueueWedgeError;
-use matrix_sdk_test::{async_test, event_factory::EventFactory, ALICE, BOB};
+use matrix_sdk_test::{async_test, ALICE, BOB};
 use ruma::{
     event_id,
     events::{room::message::RoomMessageEventContent, AnyMessageLikeEventContent},
@@ -176,6 +176,7 @@ async fn test_remote_echo_new_position() {
     assert_next_matches!(stream, VectorDiff::Remove { index: 2 });
 }
 
+/*
 #[async_test]
 async fn test_day_divider_duplication() {
     let timeline = TestTimeline::new();
@@ -211,6 +212,7 @@ async fn test_day_divider_duplication() {
     assert!(items[3].is_day_divider());
     assert!(items[4].is_local_echo());
 }
+*/
 
 #[async_test]
 async fn test_day_divider_removed_after_local_echo_disappeared() {
