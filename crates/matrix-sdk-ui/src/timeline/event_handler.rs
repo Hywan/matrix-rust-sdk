@@ -1054,10 +1054,10 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
 
         match &self.ctx.flow {
             Flow::Local { .. } => {
-                trace!("Adding new local timeline item");
+                trace!("Adding new local event item");
 
-                let item = self.meta.new_timeline_item(item);
-                self.items.push_back(item);
+                // Local event items are always at the very bottom of the timeline.
+                self.items.push_back(self.meta.new_timeline_item(item));
             }
 
             Flow::Remote {
@@ -1072,87 +1072,82 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 event_id,
                 ..
             } => {
-                // This block tries to find duplicated events.
+                // We are adding a new remote event. Let's look for the associated local event
+                // if any.
+                let local_event_item_and_index_to_remove =
+                    rfind_event_item(self.items, |event_candidate| {
+                        // We are looking for a local event.
+                        event_candidate.is_local_echo()
+                            && match event_candidate.event_id() {
+                                // Correct case: the local event HAS an event ID because it's been
+                                // sent and acknowledged correctly by the server.
+                                Some(event_candidate_id) => event_candidate_id == event_id,
 
-                let removed_event_item_id = {
-                    // Look if we already have a corresponding item somewhere, based on the
-                    // transaction id (if a local echo) or the event id (if a
-                    // duplicate remote event).
-                    let result = rfind_event_item(self.items, |it| {
-                        txn_id.is_some() && it.transaction_id() == txn_id.as_deref()
-                            || it.event_id() == Some(event_id)
+                                // Impossible case: the local event has NO event ID; it means it has
+                                // not been sent; it's impossible to receive its remote event. But
+                                // in case planets are aligned to make this situation possible,
+                                // let's compare the transaction IDs. Let be robust.
+                                None => event_candidate.transaction_id() == txn_id.as_deref(),
+                            }
                     });
 
-                    if let Some((idx, old_item)) = result {
-                        if old_item.as_remote().is_some() {
-                            // Item was previously received from the server. This should be very
-                            // rare normally, but with the sliding- sync
-                            // proxy, it is actually very common.
-                            // NOTE: SS proxy workaround.
-                            trace!(?item, old_item = ?*old_item, "Received duplicate event");
+                let new_item = if let Some((local_event_item_index, local_event_item)) =
+                    &local_event_item_and_index_to_remove
+                {
+                    // The remote event matches a local event.
 
-                            if old_item.content.is_redacted() && !item.content.is_redacted() {
-                                warn!("Got original form of an event that was previously redacted");
-                                item.content = item.content.redact(&self.meta.room_version);
-                                item.reactions.clear();
-                            }
-                        }
+                    // First off, let's transfer item details from the local event item to the event
+                    // item being added.
+                    transfer_details(&mut item, local_event_item);
 
-                        // TODO: Check whether anything is different about the
-                        //       old and new item?
+                    // Ideally, we should remove the local event, then add the new item. But, we can
+                    // do an optimisation for the most common case. Instead of doing an `remove` +
+                    // `insert`, we can do a `set` (update) if and only if the local event is
+                    // absolutely the latest item. This is possible because we don't need to update
+                    // anything else (like day divider and so on).
+                    if *local_event_item_index == self.items.len() - 1 {
+                        trace!("Updating local event to remote event");
 
-                        transfer_details(&mut item, &old_item);
+                        self.items.set(
+                            *local_event_item_index,
+                            TimelineItem::new(item, local_event_item.internal_id.clone()),
+                        );
 
-                        let old_item_id = old_item.internal_id;
-
-                        if idx == self.items.len() - 1 {
-                            // If the old item is the last one and no day divider
-                            // changes need to happen, replace and return early.
-                            trace!(idx, "Replacing existing event");
-                            self.items.set(idx, TimelineItem::new(item, old_item_id.to_owned()));
-                            return;
-                        }
-
-                        // In more complex cases, remove the item before re-adding the item.
-                        trace!("Removing local echo or duplicate timeline item");
-
-                        // no return here, below code for adding a new event
-                        // will run to re-add the removed item
-
-                        Some(self.items.remove(idx).internal_id.clone())
-                    } else {
-                        None
+                        // End of our work here. Local event has been promoted to a remote event.
+                        return;
                     }
+
+                    let local_event_item = self.items.remove(*local_event_item_index);
+
+                    TimelineItem::new(item, local_event_item.internal_id.clone())
+                } else {
+                    // The remote event doesn't match a local event.
+                    self.meta.new_timeline_item(item)
                 };
 
-                // Insert the next item after the latest event item that's not a
-                // pending local echo, or at the start if there is no such item.
+                trace!("Adding remote event item");
+
                 let (insert_index, must_push_front) = match position {
                     TimelineItemPosition::Start { .. } => (0, true),
                     TimelineItemPosition::End { .. } => {
-                        // Local echoes that are pending should stick to the bottom,
-                        // find the latest event that isn't that.
-                        let latest_event_idx =
+                        // Local events must stick to the bottom. Let's find the latest event that
+                        // isn't that.
+                        let latest_event_index =
                             self.items.iter().enumerate().rev().find_map(|(idx, item)| {
                                 (!item.as_event()?.is_local_echo()).then_some(idx)
                             });
 
-                        // Insert the next item after the latest event item that's not a pending
-                        // local echo, or at the start if there is no such item.
-                        (latest_event_idx.map_or(0, |idx| idx + 1), false)
+                        // Insert the new item after the latest event item that's not a local
+                        // event, or at the start if there is no such item.
+                        (latest_event_index.map_or(0, |index| index + 1), false)
                     }
-                    p => unreachable!(
-                        "An unexpected `TimelineItemPosition` has been received: {p:?}"
-                    ),
-                };
-
-                trace!("Adding new remote timeline item after all non-pending events");
-                let new_item = match removed_event_item_id {
-                    // If a previous version of the same item (usually a local
-                    // echo) was removed and we now need to add it again, reuse
-                    // the previous item's ID.
-                    Some(id) => TimelineItem::new(item, id),
-                    None => self.meta.new_timeline_item(item),
+                    p =>
+                    // Unreachable because of the upper `match` arm statement.
+                    {
+                        unreachable!(
+                            "An unexpected `TimelineItemPosition` has been received: {p:?}"
+                        )
+                    }
                 };
 
                 // We are about to insert the `new_item`, great! Though, we try to keep a
