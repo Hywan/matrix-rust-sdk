@@ -688,7 +688,9 @@ impl<P: RoomDataProvider> TimelineController<P> {
                 }
 
                 VectorDiff::Clear => {
-                    unimplemented!("clear all events");
+                    state.clear();
+
+                    HandleManyEventsResult { items_added: 0, items_updated: 0 }
                 }
 
                 diff => todo!("Unsupported `VectorDiff` {diff:?}"),
