@@ -470,8 +470,21 @@ impl TimelineStateTransaction<'_> {
                     one
                 }
 
-                VectorDiff::Insert { index, value: event } => {
-                    unimplemented!("insert event {event:?} at {index}");
+                VectorDiff::Insert { index: event_index, value: event } => {
+                    let HandleEventResult { item_added, items_updated, .. } = self
+                        .handle_remote_event(
+                            event,
+                            TimelineItemPosition::At { event_index, origin },
+                            room_data_provider,
+                            settings,
+                            &mut day_divider_adjuster,
+                        )
+                        .await;
+
+                    HandleManyEventsResult {
+                        items_added: u64::from(item_added),
+                        items_updated: u64::from(items_updated),
+                    }
                 }
 
                 VectorDiff::Remove { index } => {
