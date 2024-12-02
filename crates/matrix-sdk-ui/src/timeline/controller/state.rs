@@ -869,7 +869,7 @@ impl TimelineStateTransaction<'_> {
             }
 
             TimelineItemPosition::At { event_index, origin: _ } => {
-                self.meta.all_events.insert(event_index, event_meta.base_meta());
+                self.meta.all_remote_events.insert(event_index, event_meta.base_meta());
             }
 
             TimelineItemPosition::End { .. } => {

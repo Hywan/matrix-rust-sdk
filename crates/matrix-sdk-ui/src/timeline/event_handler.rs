@@ -292,7 +292,7 @@ pub(super) enum TimelineItemPosition {
     At {
         event_index: usize,
         origin: RemoteEventOrigin,
-    }
+    },
 
     /// One or more items are appended to the timeline (i.e. they're the most
     /// recent).
@@ -1039,8 +1039,7 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 let origin = match *position {
                     TimelineItemPosition::Start { origin }
                     | TimelineItemPosition::At { origin, event_index: _ }
-                    | TimelineItemPosition::End { origin } 
-                    => origin,
+                    | TimelineItemPosition::End { origin } => origin,
 
                     // For updates, reuse the origin of the encrypted event.
                     TimelineItemPosition::UpdateDecrypted { timeline_item_index: idx } => self
