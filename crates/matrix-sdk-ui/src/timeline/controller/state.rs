@@ -444,12 +444,30 @@ impl TimelineStateTransaction<'_> {
     where
         RoomData: RoomDataProvider,
     {
-        let mut result = HandleManyEventsResult::default();
+        let mut total = HandleManyEventsResult::default();
+        let mut day_divider_adjuster = DayDividerAdjuster::default();
 
         for diff in diffs {
             let HandleManyEventsResult { items_added, items_updated } = match diff {
                 VectorDiff::Append { values: events } => {
-                    unimplemented!("append");
+                    let mut one = HandleManyEventsResult::default();
+
+                    for event in events {
+                        let HandleEventResult { item_added, items_updated, .. } = self
+                            .handle_remote_event(
+                                event,
+                                TimelineItemPosition::End { origin },
+                                room_data_provider,
+                                settings,
+                                &mut day_divider_adjuster,
+                            )
+                            .await;
+
+                        one.items_added += u64::from(item_added);
+                        one.items_updated += u64::from(items_updated);
+                    }
+
+                    one
                 }
 
                 VectorDiff::Insert { index, value: event } => {
@@ -469,11 +487,14 @@ impl TimelineStateTransaction<'_> {
                 diff => todo!("Unsupported `VectorDiff` {diff:?}"),
             };
 
-            result.items_added += items_added;
-            result.items_updated += items_updated;
+            total.items_added += items_added;
+            total.items_updated += items_updated;
         }
 
-        result
+        self.adjust_day_dividers(day_divider_adjuster);
+        self.check_no_unused_unique_ids();
+
+        total
     }
 
     fn check_no_unused_unique_ids(&self) {
