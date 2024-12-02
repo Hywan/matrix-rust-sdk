@@ -30,10 +30,7 @@ use super::{
     to_device::{handle_forwarded_room_key_event, handle_room_key_event},
     Error, Timeline, TimelineDropHandle, TimelineFocus,
 };
-use crate::{
-    timeline::{controller::TimelineNewItemPosition, event_item::RemoteEventOrigin},
-    unable_to_decrypt_hook::UtdHookManager,
-};
+use crate::{timeline::event_item::RemoteEventOrigin, unable_to_decrypt_hook::UtdHookManager};
 
 /// Builder that allows creating and configuring various parts of a
 /// [`Timeline`].
@@ -271,11 +268,10 @@ impl TimelineBuilder {
                         RoomEventCacheUpdate::AddTimelineEvents { events, origin } => {
                             trace!("Received new timeline events.");
 
-                            inner.add_events_at(
-                                events.into_iter(),
-                                TimelineNewItemPosition::End {                                    origin: match origin {
-                                        EventsOrigin::Sync => RemoteEventOrigin::Sync,
-                                    }
+                            inner.add_events_with_diffs(
+                                events,
+                                match origin {
+                                    EventsOrigin::Sync => RemoteEventOrigin::Sync,
                                 }
                             ).await;
                         }
