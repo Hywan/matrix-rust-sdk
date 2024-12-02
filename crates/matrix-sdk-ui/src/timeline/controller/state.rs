@@ -555,6 +555,8 @@ impl TimelineStateTransaction<'_> {
                         TimelineItemPosition::End { origin }
                         | TimelineItemPosition::Start { origin } => origin,
 
+                        TimelineItemPosition::At { event_index: _, origin } => origin,
+
                         TimelineItemPosition::UpdateDecrypted { timeline_item_index: idx } => self
                             .items
                             .get(idx)
@@ -819,6 +821,10 @@ impl TimelineStateTransaction<'_> {
                 self.meta.all_remote_events.push_front(event_meta.base_meta())
             }
 
+            TimelineItemPosition::At { event_index, origin: _ } => {
+                self.meta.all_events.insert(event_index, event_meta.base_meta());
+            }
+
             TimelineItemPosition::End { .. } => {
                 if let Some(pos) =
                     event_already_exists(event_meta.event_id, &self.meta.all_remote_events)
@@ -849,7 +855,9 @@ impl TimelineStateTransaction<'_> {
         if settings.track_read_receipts
             && matches!(
                 position,
-                TimelineItemPosition::Start { .. } | TimelineItemPosition::End { .. }
+                TimelineItemPosition::Start { .. }
+                    | TimelineItemPosition::End { .. }
+                    | TimelineItemPosition::At { .. }
             )
         {
             self.load_read_receipts_for_event(event_meta.event_id, room_data_provider).await;

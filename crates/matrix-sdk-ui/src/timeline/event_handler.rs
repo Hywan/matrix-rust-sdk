@@ -289,6 +289,11 @@ pub(super) enum TimelineItemPosition {
         origin: RemoteEventOrigin,
     },
 
+    At {
+        event_index: usize,
+        origin: RemoteEventOrigin,
+    }
+
     /// One or more items are appended to the timeline (i.e. they're the most
     /// recent).
     End {
@@ -600,15 +605,15 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
         replacement: PendingEdit,
     ) {
         match position {
-            TimelineItemPosition::Start { .. } | TimelineItemPosition::UpdateDecrypted { .. } => {
+            TimelineItemPosition::Start { .. } | TimelineItemPosition::At { .. } | TimelineItemPosition::UpdateDecrypted { .. } => {
                 // Only insert the edit if there wasn't any other edit
                 // before.
                 //
-                // For a start position, this is the right thing to do, because if there was a
+                // For a `Start` or `At` position, this is the right thing to do, because if there was a
                 // stashed edit, it relates to a more recent one (either appended for a live
                 // sync, or inserted earlier via back-pagination).
                 //
-                // For an update position, if there was a stashed edit, we can't really know
+                // For an `UpdateDecrypted` position, if there was a stashed edit, we can't really know
                 // which version is the more recent, without an ordering of the
                 // edit events themselves, so we discard it in that case.
                 if !self
@@ -1033,7 +1038,9 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
             Flow::Remote { event_id, raw_event, position, txn_id, encryption_info, .. } => {
                 let origin = match *position {
                     TimelineItemPosition::Start { origin }
-                    | TimelineItemPosition::End { origin } => origin,
+                    | TimelineItemPosition::At { origin, event_index: _ }
+                    | TimelineItemPosition::End { origin } 
+                    => origin,
 
                     // For updates, reuse the origin of the encrypted event.
                     TimelineItemPosition::UpdateDecrypted { timeline_item_index: idx } => self
@@ -1087,6 +1094,12 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
 
             Flow::Remote {
                 position: position @ TimelineItemPosition::Start { .. },
+                txn_id,
+                event_id,
+                ..
+            }
+            | Flow::Remote {
+                position: position @ TimelineItemPosition::At { .. },
                 txn_id,
                 event_id,
                 ..
@@ -1162,6 +1175,10 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                     TimelineItemPosition::Start { .. } => {
                         trace!("Adding new remote timeline item at the front");
                         self.items.push_front(new_item);
+                    }
+
+                    TimelineItemPosition::At { event_index, .. } => {
+                        todo!("add item at specific index");
                     }
 
                     TimelineItemPosition::End { .. } => {
