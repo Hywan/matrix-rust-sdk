@@ -653,54 +653,24 @@ impl<P: RoomDataProvider> TimelineController<P> {
         state.add_remote_events_at(events, position, &self.room_data_provider, &self.settings).await
     }
 
-    pub(super) async fn add_events_with_diffs(
+    pub(super) async fn handle_remote_events_with_vector_diffs(
         &self,
         diffs: Vec<VectorDiff<SyncTimelineEvent>>,
         origin: RemoteEventOrigin,
     ) -> HandleManyEventsResult {
-        let mut result = Default::default();
-
         if diffs.is_empty() {
-            return result;
+            return Default::default();
         }
 
         let mut state = self.state.write().await;
-
-        for diff in diffs {
-            let HandleManyEventsResult { items_added, items_updated } = match diff {
-                VectorDiff::Append { values: events } => {
-                    state
-                        .add_remote_events_at(
-                            events.into_iter(),
-                            TimelineNewItemPosition::End { origin },
-                            &self.room_data_provider,
-                            &self.settings,
-                        )
-                        .await
-                }
-
-                VectorDiff::Insert { index, value: event } => {
-                    unimplemented!("insert event {event:?} at {index}");
-                }
-
-                VectorDiff::Remove { index } => {
-                    unimplemented!("remove event at {index}");
-                }
-
-                VectorDiff::Clear => {
-                    state.clear();
-
-                    HandleManyEventsResult { items_added: 0, items_updated: 0 }
-                }
-
-                diff => todo!("Unsupported `VectorDiff` {diff:?}"),
-            };
-
-            result.items_added += items_added;
-            result.items_updated += items_updated;
-        }
-
-        result
+        state
+            .handle_remote_events_with_vector_diffs(
+                diffs,
+                origin,
+                &self.room_data_provider,
+                &self.settings,
+            )
+            .await
     }
 
     pub(super) async fn clear(&self) {

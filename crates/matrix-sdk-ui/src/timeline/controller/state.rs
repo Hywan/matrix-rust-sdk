@@ -19,7 +19,9 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use eyeball_im::{ObservableVector, ObservableVectorTransaction, ObservableVectorTransactionEntry};
+use eyeball_im::{
+    ObservableVector, ObservableVectorTransaction, ObservableVectorTransactionEntry, VectorDiff,
+};
 use itertools::Itertools as _;
 use matrix_sdk::{
     deserialized_responses::SyncTimelineEvent, ring_buffer::RingBuffer, send_queue::SendHandle,
@@ -149,6 +151,29 @@ impl TimelineState {
         txn.commit();
 
         handle_many_res
+    }
+
+    pub(super) async fn handle_remote_events_with_vector_diffs<RoomData>(
+        &mut self,
+        diffs: Vec<VectorDiff<SyncTimelineEvent>>,
+        origin: RemoteEventOrigin,
+        room_data_provider: &RoomData,
+        settings: &TimelineSettings,
+    ) -> HandleManyEventsResult
+    where
+        RoomData: RoomDataProvider,
+    {
+        if diffs.is_empty() {
+            return Default::default();
+        }
+
+        let mut txn = self.transaction();
+        let result = txn
+            .handle_remote_events_with_vector_diffs(diffs, origin, room_data_provider, settings)
+            .await;
+        txn.commit();
+
+        result
     }
 
     /// Marks the given event as fully read, using the read marker received from
@@ -407,6 +432,48 @@ impl TimelineStateTransaction<'_> {
 
         self.check_no_unused_unique_ids();
         total
+    }
+
+    pub(super) async fn handle_remote_events_with_vector_diffs<RoomData>(
+        &mut self,
+        diffs: Vec<VectorDiff<SyncTimelineEvent>>,
+        origin: RemoteEventOrigin,
+        room_data_provider: &RoomData,
+        settings: &TimelineSettings,
+    ) -> HandleManyEventsResult
+    where
+        RoomData: RoomDataProvider,
+    {
+        let mut result = HandleManyEventsResult::default();
+
+        for diff in diffs {
+            let HandleManyEventsResult { items_added, items_updated } = match diff {
+                VectorDiff::Append { values: events } => {
+                    unimplemented!("append");
+                }
+
+                VectorDiff::Insert { index, value: event } => {
+                    unimplemented!("insert event {event:?} at {index}");
+                }
+
+                VectorDiff::Remove { index } => {
+                    unimplemented!("remove event at {index}");
+                }
+
+                VectorDiff::Clear => {
+                    self.clear();
+
+                    HandleManyEventsResult { items_added: 0, items_updated: 0 }
+                }
+
+                diff => todo!("Unsupported `VectorDiff` {diff:?}"),
+            };
+
+            result.items_added += items_added;
+            result.items_updated += items_updated;
+        }
+
+        result
     }
 
     fn check_no_unused_unique_ids(&self) {
