@@ -497,10 +497,10 @@ impl RoomEventCacheInner {
                 .await?;
 
             let mut cache = self.all_events.write().await;
-            for ev in &sync_timeline_events {
-                if let Some(event_id) = ev.event_id() {
-                    self.append_related_event(&mut cache, ev);
-                    cache.events.insert(event_id.to_owned(), (self.room_id.clone(), ev.clone()));
+            for event in sync_timeline_events {
+                if let Some(event_id) = event.event_id() {
+                    self.append_related_event(&mut cache, &event);
+                    cache.events.insert(event_id.to_owned(), (self.room_id.clone(), event.clone()));
                 }
             }
         }
@@ -513,9 +513,11 @@ impl RoomEventCacheInner {
 
         // The order of `RoomEventCacheUpdate`s is **really** important here.
         {
-            if !sync_timeline_events.is_empty() {
+            let sync_timeline_event_diffs = room_events.updates_as_vector_diffs();
+
+            if !sync_timeline_event_diffs.is_empty() {
                 let _ = self.sender.send(RoomEventCacheUpdate::AddTimelineEvents {
-                    events: sync_timeline_events,
+                    events: sync_timeline_event_diffs,
                     origin: EventsOrigin::Sync,
                 });
             }
