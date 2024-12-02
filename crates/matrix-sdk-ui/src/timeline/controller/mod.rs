@@ -668,7 +668,30 @@ impl<P: RoomDataProvider> TimelineController<P> {
 
         for diff in diffs {
             let HandleManyEventsResult { items_added, items_updated } = match diff {
-                _ => todo!(),
+                VectorDiff::Append { values: events } => {
+                    state
+                        .add_remote_events_at(
+                            events.into_iter(),
+                            TimelineNewItemPosition::End { origin },
+                            &self.room_data_provider,
+                            &self.settings,
+                        )
+                        .await
+                }
+
+                VectorDiff::Insert { index, value: event } => {
+                    unimplemented!("insert event {event:?} at {index}");
+                }
+
+                VectorDiff::Remove { index } => {
+                    unimplemented!("remove event at {index}");
+                }
+
+                VectorDiff::Clear => {
+                    unimplemented!("clear all events");
+                }
+
+                diff => todo!("Unsupported `VectorDiff` {diff:?}"),
             };
 
             result.items_added += items_added;
