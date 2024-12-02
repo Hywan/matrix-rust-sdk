@@ -212,6 +212,24 @@ macro_rules! assert_timeline_stream {
         )
     };
 
+    // `clear`
+    ( @_ [ $stream:ident ] [ clear ; $( $rest:tt )* ] [ $( $accumulator:tt )* ] ) => {
+        assert_timeline_stream!(
+            @_
+            [ $stream ]
+            [ $( $rest )* ]
+            [
+                $( $accumulator )*
+                {
+                    assert_matches!(
+                        $stream.next().now_or_never(),
+                        Some(Some(VectorDiff::Clear))
+                    );
+                }
+            ]
+        )
+    };
+
     ( @_ [ $stream:ident ] [] [ $( $accumulator:tt )* ] ) => {
         $( $accumulator )*
     };
@@ -390,6 +408,7 @@ async fn test_timeline_duplicated_events() -> Result<()> {
 
         assert_timeline_stream! {
             [timeline_stream]
+            clear;
             append    "$x1:bar.org";
             update[0] "$x1:bar.org";
             append    "$x2:bar.org";
@@ -470,6 +489,7 @@ async fn test_timeline_read_receipts_are_updated_live() -> Result<()> {
 
         assert_timeline_stream! {
             [timeline_stream]
+            clear;
             append    "$x1:bar.org";
             update[0] "$x1:bar.org";
             append    "$x2:bar.org";
