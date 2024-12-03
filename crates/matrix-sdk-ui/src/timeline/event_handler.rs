@@ -1021,6 +1021,16 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
     }
 
     /// Add a new event item in the timeline.
+    ///
+    /// # Safety
+    ///
+    /// This method is not marked as unsafe **but** it manipulates
+    /// `TimelineMetada::all_remote_events`. 2 rules **must** be respected:
+    ///
+    /// 1. the remote event of the item being added **must** be present in
+    ///    `all_remote_events`,
+    /// 2. the last added or updated remote event must be associated to the
+    ///    timeline item being added here.
     fn add_item(
         &mut self,
         content: TimelineItemContent,
@@ -1179,13 +1189,11 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                     None => self.meta.new_timeline_item(item),
                 };
 
-                let (event_index, timeline_item_index) = match position {
+                match position {
                     TimelineItemPosition::Start { .. } => {
                         trace!("Adding new remote timeline item at the front");
+                        self.meta.all_remote_events.insert_timeline_item_index_at(0, 0);
                         self.items.push_front(new_item);
-
-                        // Both `event_index` and `timeline_item_index` are necessarily the firsts.
-                        (0, 0)
                     }
 
                     TimelineItemPosition::At { event_index: _, .. } => {
@@ -1193,16 +1201,18 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                     }
 
                     TimelineItemPosition::End { .. } => {
-                        // Local echoes that are pending should stick to the bottom,
-                        // find the latest event that isn't that.
-                        let timeline_item_index =
-                            self.items.iter().enumerate().rev().find_map(|(idx, item)| {
-                                (!item.as_event()?.is_local_echo()).then_some(idx)
-                            });
-
-                        // Insert the next item after the latest event item that's not a pending
-                        // local echo, or at the start if there is no such item.
-                        let timeline_item_index = timeline_item_index.map_or(0, |idx| idx + 1);
+                        // Local events are always at the bottom. Let's find the latest remote event
+                        // and insert after it, otherwise, if there is no remote event, insert at 0.
+                        let timeline_item_index = self
+                            .items
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find_map(|(timeline_item_index, timeline_item)| {
+                                (!timeline_item.as_event()?.is_local_echo())
+                                    .then_some(timeline_item_index + 1)
+                            })
+                            .unwrap_or(0);
 
                         // Try to keep precise insertion semantics here, in this exact order:
                         //
@@ -1227,35 +1237,19 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                             self.items.insert(timeline_item_index, new_item);
                         }
 
-                        // The `event_index` is necessarily the last of
-                        // `TimelineMeta::all_remote_events`.
-                        (self.meta.all_remote_events.len().saturating_sub(1), timeline_item_index)
+                        self.meta.all_remote_events.insert_timeline_item_index_at(
+                            self.meta.all_remote_events.last_event_index()
+                                // The last remote event is necessarily associated to this
+                                // timeline item, see the contract of this method.
+                                .expect("A timeline item is being added but its associated remote event is missing"),
+                            timeline_item_index,
+                        );
                     }
 
                     p => unreachable!(
                         "An unexpected `TimelineItemPosition` has been received: {p:?}"
                     ),
                 };
-
-                // Update the mapping from `event_index` to
-                // `timeline_item_index`.
-                {
-                    // Ensure `all_remote_events` is consistent.
-                    debug_assert_eq!(
-                        &self
-                            .meta
-                            .all_remote_events
-                            .get(event_index)
-                            .expect("Event is missing from `all_remote_events`")
-                            .event_id,
-                        event_id,
-                        "`event_index` does not map to the expected event"
-                    );
-
-                    self.meta
-                        .all_remote_events
-                        .insert_timeline_item_index_at(event_index, timeline_item_index);
-                }
             }
 
             Flow::Remote {

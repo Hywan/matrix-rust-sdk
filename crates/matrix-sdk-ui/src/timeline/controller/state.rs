@@ -1299,14 +1299,6 @@ impl AllRemoteEvents {
         self.0.clear();
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn get(&self, event_index: usize) -> Option<&EventMeta> {
-        self.0.get(event_index)
-    }
-
     /// Insert a new remote event at the front of all the others.
     pub fn push_front(&mut self, event_meta: EventMeta) {
         self.0.push_front(event_meta)
@@ -1329,6 +1321,11 @@ impl AllRemoteEvents {
     /// Return a reference to the last remote event if it exists.
     pub fn last(&self) -> Option<&EventMeta> {
         self.0.back()
+    }
+
+    /// Return the event index of the last remote event if it exists.
+    pub fn last_event_index(&self) -> Option<usize> {
+        self.0.len().checked_sub(1)
     }
 
     /// Get a mutable reference to a specific remote event by its ID.
