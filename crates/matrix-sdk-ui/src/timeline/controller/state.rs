@@ -1298,6 +1298,14 @@ impl AllRemoteEvents {
         self.0.clear();
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn get(&self, event_index: usize) -> Option<&EventMeta> {
+        self.0.get(event_index)
+    }
+
     /// Insert a new remote event at the front of all the others.
     pub fn push_front(&mut self, event_meta: EventMeta) {
         self.0.push_front(event_meta)
@@ -1306,6 +1314,10 @@ impl AllRemoteEvents {
     /// Insert a new remote event at the back of all the others.
     pub fn push_back(&mut self, event_meta: EventMeta) {
         self.0.push_back(event_meta)
+    }
+
+    pub fn insert(&mut self, event_index: usize, event_meta: EventMeta) {
+        self.0.insert(event_index, event_meta)
     }
 
     /// Remove one remote event at a specific index, and return it if it exists.
@@ -1321,6 +1333,28 @@ impl AllRemoteEvents {
     /// Get a mutable reference to a specific remote event by its ID.
     pub fn get_by_event_id_mut(&mut self, event_id: &EventId) -> Option<&mut EventMeta> {
         self.0.iter_mut().rev().find(|event_meta| event_meta.event_id == event_id)
+    }
+
+    /// # Safety
+    ///
+    /// Panic if `event_index` doesn't exist.
+    pub fn insert_timeline_item_index_at(
+        &mut self,
+        event_index: usize,
+        new_timeline_item_index: usize,
+    ) {
+        // A new `timeline_item_index` is inserted. Let's shift all
+        // `timeline_item_index` that come after this new one.
+        for event_meta in self.0.iter_mut() {
+            if let Some(timeline_itme_index) = event_meta.timeline_item_index.as_mut() {
+                if *timeline_itme_index >= new_timeline_item_index {
+                    *timeline_itme_index += 1;
+                }
+            }
+        }
+
+        self.0.get_mut(event_index).expect("No event at `event_index`").timeline_item_index =
+            Some(new_timeline_item_index);
     }
 }
 
@@ -1342,7 +1376,11 @@ pub(crate) struct FullEventMeta<'a> {
 
 impl FullEventMeta<'_> {
     fn base_meta(&self) -> EventMeta {
-        EventMeta { event_id: self.event_id.to_owned(), visible: self.visible }
+        EventMeta {
+            event_id: self.event_id.to_owned(),
+            visible: self.visible,
+            timeline_item_index: None,
+        }
     }
 }
 
@@ -1353,4 +1391,14 @@ pub(crate) struct EventMeta {
     pub event_id: OwnedEventId,
     /// Whether the event is among the timeline items.
     pub visible: bool,
+    /// A way to map an `event_index` (a key index from
+    /// [`TimelineMetadata::all_events`]) or `event_id` (from
+    /// [`Self::event_id`]) to a `timeline_item_index`.
+    ///
+    /// It is `Some(_)` if the timeline item is something that doesn't _move_ in
+    /// the timeline, `None` otherwise.
+    ///
+    /// Something that _moves_ is an item that attaches to or groups with
+    /// another item, like reactions.
+    pub timeline_item_index: Option<usize>,
 }

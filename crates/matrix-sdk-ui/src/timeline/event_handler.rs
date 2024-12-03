@@ -509,14 +509,23 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
             trace!("No new item added");
 
             if let Flow::Remote {
-                position: TimelineItemPosition::UpdateDecrypted { timeline_item_index: idx },
+                position: TimelineItemPosition::UpdateDecrypted { timeline_item_index },
                 ..
             } = self.ctx.flow
             {
                 // If add was not called, that means the UTD event is one that
                 // wouldn't normally be visible. Remove it.
                 trace!("Removing UTD that was successfully retried");
-                self.items.remove(idx);
+
+                // Shift all `timeline_item_index`s to the left after `timeline_item_index`!
+                for event_meta in self.meta.all_remote_events.iter_mut() {
+                    if let Some(index) = event_meta.timeline_item_index.as_mut() {
+                        if *index >= timeline_item_index {
+                            *index -= 1;
+                        }
+                    }
+                }
+                self.items.remove(timeline_item_index);
 
                 self.result.item_removed = true;
             }
@@ -605,17 +614,21 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
         replacement: PendingEdit,
     ) {
         match position {
-            TimelineItemPosition::Start { .. } | TimelineItemPosition::At { .. } | TimelineItemPosition::UpdateDecrypted { .. } => {
+            TimelineItemPosition::Start { .. }
+            | TimelineItemPosition::At { .. }
+            | TimelineItemPosition::UpdateDecrypted { .. } => {
                 // Only insert the edit if there wasn't any other edit
                 // before.
                 //
-                // For a `Start` or `At` position, this is the right thing to do, because if there was a
-                // stashed edit, it relates to a more recent one (either appended for a live
-                // sync, or inserted earlier via back-pagination).
+                // For a `Start` or `At` position, this is the right thing to do, because if
+                // there was a stashed edit, it relates to a more recent one
+                // (either appended for a live sync, or inserted earlier via
+                // back-pagination).
                 //
-                // For an `UpdateDecrypted` position, if there was a stashed edit, we can't really know
-                // which version is the more recent, without an ordering of the
-                // edit events themselves, so we discard it in that case.
+                // For an `UpdateDecrypted` position, if there was a stashed edit, we can't
+                // really know which version is the more recent, without an
+                // ordering of the edit events themselves, so we discard it in
+                // that case.
                 if !self
                     .meta
                     .pending_edits
@@ -1156,6 +1169,9 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                         // no return here, the below logic for adding a new event
                         // will run to re-add the removed item
 
+                        // no need to update `TimelineMetadata::all_remote_events` because only
+                        // local events are removed in this particular block.
+
                         Some(self.items.remove(idx).internal_id.clone())
                     } else {
                         None
@@ -1170,27 +1186,30 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                     None => self.meta.new_timeline_item(item),
                 };
 
-                match position {
+                let (event_index, timeline_item_index) = match position {
                     TimelineItemPosition::Start { .. } => {
                         trace!("Adding new remote timeline item at the front");
                         self.items.push_front(new_item);
+
+                        // Both `event_index` and `timeline_item_index` are necessarily the firsts.
+                        (0, 0)
                     }
 
-                    TimelineItemPosition::At { event_index, .. } => {
+                    TimelineItemPosition::At { event_index: _, .. } => {
                         todo!("add item at specific index");
                     }
 
                     TimelineItemPosition::End { .. } => {
                         // Local echoes that are pending should stick to the bottom,
                         // find the latest event that isn't that.
-                        let latest_event_idx =
+                        let timeline_item_index =
                             self.items.iter().enumerate().rev().find_map(|(idx, item)| {
                                 (!item.as_event()?.is_local_echo()).then_some(idx)
                             });
 
                         // Insert the next item after the latest event item that's not a pending
                         // local echo, or at the start if there is no such item.
-                        let insert_idx = latest_event_idx.map_or(0, |idx| idx + 1);
+                        let timeline_item_index = timeline_item_index.map_or(0, |idx| idx + 1);
 
                         // Try to keep precise insertion semantics here, in this exact order:
                         //
@@ -1201,22 +1220,49 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                         // * _push front_ when the new item is inserted at index 0,
                         // * _insert_ otherwise.
 
-                        if insert_idx == self.items.len() {
+                        if timeline_item_index == self.items.len() {
                             trace!("Adding new remote timeline item at the back");
                             self.items.push_back(new_item);
-                        } else if insert_idx == 0 {
+                        } else if timeline_item_index == 0 {
                             trace!("Adding new remote timeline item at the front");
                             self.items.push_front(new_item);
                         } else {
-                            trace!(insert_idx, "Adding new remote timeline item at specific index");
-                            self.items.insert(insert_idx, new_item);
+                            trace!(
+                                timeline_item_index,
+                                "Adding new remote timeline item at specific index"
+                            );
+                            self.items.insert(timeline_item_index, new_item);
                         }
+
+                        // The `event_index` is necessarily the last of
+                        // `TimelineMeta::all_remote_events`.
+                        (self.meta.all_remote_events.len().saturating_sub(1), timeline_item_index)
                     }
 
                     p => unreachable!(
                         "An unexpected `TimelineItemPosition` has been received: {p:?}"
                     ),
                 };
+
+                // Update the mapping from `event_index` to
+                // `timeline_item_index`.
+                {
+                    // Ensure `all_remote_events` is consistent.
+                    debug_assert_eq!(
+                        &self
+                            .meta
+                            .all_remote_events
+                            .get(event_index)
+                            .expect("Event is missing from `all_remote_events`")
+                            .event_id,
+                        event_id,
+                        "`event_index` does not map to the expected event"
+                    );
+
+                    self.meta
+                        .all_remote_events
+                        .insert_timeline_item_index_at(event_index, timeline_item_index);
+                }
             }
 
             Flow::Remote {
