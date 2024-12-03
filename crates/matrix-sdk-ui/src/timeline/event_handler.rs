@@ -1192,12 +1192,53 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 match position {
                     TimelineItemPosition::Start { .. } => {
                         trace!("Adding new remote timeline item at the front");
+
                         self.meta.all_remote_events.insert_timeline_item_index_at(0, 0);
                         self.items.push_front(new_item);
                     }
 
-                    TimelineItemPosition::At { event_index: _, .. } => {
-                        todo!("add item at specific index");
+                    TimelineItemPosition::At { event_index, .. } => {
+                        let event_index = *event_index;
+
+                        // Look for the closest `timeline_item_index` at the left of the current
+                        // event.
+                        let timeline_item_index = self
+                            .meta
+                            .all_remote_events
+                            // The events at the left.
+                            //
+                            // Note: the case where `event_index = 0` is matched with
+                            // `TimelineItemPosition::Start`.
+                            .range(0..=event_index)
+                            // In reverse order, because we want to find the closest.
+                            .rev()
+                            .find_map(|event_meta| event_meta.timeline_item_index)
+                            // The new `timeline_item_index` is the previous + 1.
+                            .map(|timeline_item_index| timeline_item_index + 1)
+                            //
+                            // No index? Look for the closest `timeline_item_index` at the right of
+                            // the current event.
+                            .or_else(|| {
+                                self.meta
+                                    .all_remote_events
+                                    // The events at the right.
+                                    .range(event_index + 1..)
+                                    .find_map(|event_meta| event_meta.timeline_item_index)
+                            })
+                            //
+                            // No index? Well, it means there is no existing `timeline_item_index`
+                            // so we are inserting at position 0.
+                            .unwrap_or(0);
+
+                        trace!(
+                            timeline_item_index,
+                            "Adding new remote timeline item at specific index"
+                        );
+
+                        self.meta
+                            .all_remote_events
+                            .insert_timeline_item_index_at(event_index, timeline_item_index);
+                        self.items.insert(timeline_item_index, new_item);
                     }
 
                     TimelineItemPosition::End { .. } => {
@@ -1225,15 +1266,18 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
 
                         if timeline_item_index == self.items.len() {
                             trace!("Adding new remote timeline item at the back");
+
                             self.items.push_back(new_item);
                         } else if timeline_item_index == 0 {
                             trace!("Adding new remote timeline item at the front");
+
                             self.items.push_front(new_item);
                         } else {
                             trace!(
                                 timeline_item_index,
                                 "Adding new remote timeline item at specific index"
                             );
+
                             self.items.insert(timeline_item_index, new_item);
                         }
 

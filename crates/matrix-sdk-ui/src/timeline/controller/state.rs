@@ -17,6 +17,7 @@ use std::{
     collections::{vec_deque::Iter, HashMap, VecDeque},
     future::Future,
     num::NonZeroUsize,
+    ops::RangeBounds,
     sync::{Arc, RwLock},
 };
 
@@ -1292,6 +1293,13 @@ impl AllRemoteEvents {
     /// Return a front-to-back iterator over all remote events.
     pub fn iter(&self) -> Iter<'_, EventMeta> {
         self.0.iter()
+    }
+
+    pub fn range<R>(&self, range: R) -> Iter<'_, EventMeta>
+    where
+        R: RangeBounds<usize>,
+    {
+        self.0.range(range)
     }
 
     /// Remove all remote events.
