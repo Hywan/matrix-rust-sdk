@@ -517,14 +517,7 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 // wouldn't normally be visible. Remove it.
                 trace!("Removing UTD that was successfully retried");
 
-                // Shift all `timeline_item_index`s to the left after `timeline_item_index`!
-                for event_meta in self.meta.all_remote_events.iter_mut() {
-                    if let Some(index) = event_meta.timeline_item_index.as_mut() {
-                        if *index >= timeline_item_index {
-                            *index -= 1;
-                        }
-                    }
-                }
+                self.meta.all_remote_events.remove_timeline_item_index(timeline_item_index);
                 self.items.remove(timeline_item_index);
 
                 self.result.item_removed = true;

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    cmp::Ordering,
     collections::{vec_deque::Iter, HashMap, VecDeque},
     future::Future,
     num::NonZeroUsize,
@@ -1355,6 +1356,34 @@ impl AllRemoteEvents {
 
         self.0.get_mut(event_index).expect("No event at `event_index`").timeline_item_index =
             Some(new_timeline_item_index);
+    }
+
+    pub fn remove_timeline_item_index(&mut self, timeline_item_index_to_remove: usize) {
+        for event_meta in self.0.iter_mut() {
+            let mut remove_timeline_item_index = false;
+
+            // A `timeline_item_index` is removed. Let's shift all indexes that come
+            // after the removed one.
+            if let Some(timeline_item_index) = event_meta.timeline_item_index.as_mut() {
+                match (*timeline_item_index).cmp(&timeline_item_index_to_remove) {
+                    Ordering::Equal => {
+                        remove_timeline_item_index = true;
+                    }
+
+                    Ordering::Greater => {
+                        *timeline_item_index -= 1;
+                    }
+
+                    Ordering::Less => {}
+                }
+            }
+
+            // This is the `event_meta` that holds the `timeline_item_index` that is being
+            // removed. So let's clean it.
+            if remove_timeline_item_index {
+                event_meta.timeline_item_index = None;
+            }
+        }
     }
 }
 
