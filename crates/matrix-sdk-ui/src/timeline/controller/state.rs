@@ -1301,21 +1301,52 @@ impl AllRemoteEvents {
 
     /// Insert a new remote event at the front of all the others.
     pub fn push_front(&mut self, event_meta: EventMeta) {
+        // If there is an associated `timeline_item_index`, shift all the
+        // `timeline_item_index` that come after this one.
+        if let Some(new_timeline_item_index) = event_meta.timeline_item_index {
+            self.increment_all_timeline_item_index_after(new_timeline_item_index);
+        }
+
+        // Push the event.
         self.0.push_front(event_meta)
     }
 
     /// Insert a new remote event at the back of all the others.
     pub fn push_back(&mut self, event_meta: EventMeta) {
+        // If there is an associated `timeline_item_index`, shift all the
+        // `timeline_item_index` that come after this one.
+        if let Some(new_timeline_item_index) = event_meta.timeline_item_index {
+            self.increment_all_timeline_item_index_after(new_timeline_item_index);
+        }
+
+        // Push the event.
         self.0.push_back(event_meta)
     }
 
     pub fn insert(&mut self, event_index: usize, event_meta: EventMeta) {
+        // If there is an associated `timeline_item_index`, shift all the
+        // `timeline_item_index` that come after this one.
+        if let Some(new_timeline_item_index) = event_meta.timeline_item_index {
+            self.increment_all_timeline_item_index_after(new_timeline_item_index);
+        }
+
         self.0.insert(event_index, event_meta)
     }
 
     /// Remove one remote event at a specific index, and return it if it exists.
+    ///
+    /// It is assumed that the associated timeline item is also removed!
     pub fn remove(&mut self, event_index: usize) -> Option<EventMeta> {
-        self.0.remove(event_index)
+        // Remove the event.
+        let event_meta = self.0.remove(event_index)?;
+
+        // If there is an associated `timeline_item_index`, shift all the
+        // `timeline_item_index` that come after this one.
+        if let Some(removed_timeline_item_index) = event_meta.timeline_item_index {
+            self.decrement_all_timeline_item_index_after(removed_timeline_item_index);
+        };
+
+        Some(event_meta)
     }
 
     /// Return a reference to the last remote event if it exists.
@@ -1379,6 +1410,26 @@ impl AllRemoteEvents {
             // removed. So let's clean it.
             if remove_timeline_item_index {
                 event_meta.timeline_item_index = None;
+            }
+        }
+    }
+
+    fn increment_all_timeline_item_index_after(&mut self, new_timeline_item_index: usize) {
+        for event_meta in self.0.iter_mut() {
+            if let Some(timeline_item_index) = event_meta.timeline_item_index.as_mut() {
+                if *timeline_item_index >= new_timeline_item_index {
+                    *timeline_item_index += 1;
+                }
+            }
+        }
+    }
+
+    fn decrement_all_timeline_item_index_after(&mut self, removed_timeline_item_index: usize) {
+        for event_meta in self.0.iter_mut() {
+            if let Some(timeline_item_index) = event_meta.timeline_item_index.as_mut() {
+                if *timeline_item_index > removed_timeline_item_index {
+                    *timeline_item_index -= 1;
+                }
             }
         }
     }
