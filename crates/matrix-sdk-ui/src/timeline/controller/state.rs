@@ -884,7 +884,7 @@ impl TimelineStateTransaction<'_> {
             }
 
             TimelineItemPosition::UpdateDecrypted { .. } => {
-                if let Some(event) =
+                if let Some((_event_index, event)) =
                     self.meta.all_remote_events.get_by_event_id_mut(event_meta.event_id)
                 {
                     if event.visible != event_meta.visible {
@@ -1360,30 +1360,34 @@ impl AllRemoteEvents {
     }
 
     /// Get a mutable reference to a specific remote event by its ID.
-    pub fn get_by_event_id_mut(&mut self, event_id: &EventId) -> Option<&mut EventMeta> {
-        self.0.iter_mut().rev().find(|event_meta| event_meta.event_id == event_id)
+    pub fn get_by_event_id_mut(&mut self, event_id: &EventId) -> Option<(usize, &mut EventMeta)> {
+        self.0
+            .iter_mut()
+            .enumerate()
+            .rev()
+            .find(|(_event_index, event_meta)| event_meta.event_id == event_id)
     }
 
-    /// # Safety
-    ///
-    /// Panic if `event_index` doesn't exist.
     pub fn insert_timeline_item_index_at(
         &mut self,
         event_index: usize,
         new_timeline_item_index: usize,
     ) {
-        // A new `timeline_item_index` is inserted. Let's shift all
-        // `timeline_item_index` that come after this new one.
-        for event_meta in self.0.iter_mut() {
+        for (current_event_index, event_meta) in self.0.iter_mut().enumerate() {
+            // A `timeline_item_index` is added. Let's shift all indexes that come after the
+            // new one.
             if let Some(timeline_item_index) = event_meta.timeline_item_index.as_mut() {
                 if *timeline_item_index >= new_timeline_item_index {
                     *timeline_item_index += 1;
                 }
             }
-        }
 
-        self.0.get_mut(event_index).expect("No event at `event_index`").timeline_item_index =
-            Some(new_timeline_item_index);
+            // This is the `event_meta` that must hold the `timeline_item_index` that is
+            // being added. So let's add it.
+            if event_index == current_event_index {
+                event_meta.timeline_item_index = Some(new_timeline_item_index);
+            }
+        }
     }
 
     pub fn remove_timeline_item_index(&mut self, timeline_item_index_to_remove: usize) {
