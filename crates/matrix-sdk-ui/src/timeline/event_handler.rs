@@ -1054,7 +1054,7 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
             Flow::Remote { event_id, raw_event, position, txn_id, encryption_info, .. } => {
                 let origin = match *position {
                     TimelineItemPosition::Start { origin }
-                    | TimelineItemPosition::At { origin, event_index: _ }
+                    | TimelineItemPosition::At { origin, .. }
                     | TimelineItemPosition::End { origin } => origin,
 
                     // For updates, reuse the origin of the encrypted event.
