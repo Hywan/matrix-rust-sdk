@@ -1237,7 +1237,9 @@ impl TimelineMetadata {
             (None, Some(idx)) => {
                 // Only insert the read marker if it is not at the end of the timeline.
                 if idx + 1 < items.len() {
-                    items.insert(idx + 1, TimelineItem::read_marker());
+                    let idx = idx + 1;
+                    items.insert(idx, TimelineItem::read_marker());
+                    self.all_remote_events.timeline_item_has_been_inserted_at(None, idx);
                     self.has_up_to_date_read_marker_item = true;
                 } else {
                     // The next event might require a read marker to be inserted at the current
@@ -1258,6 +1260,7 @@ impl TimelineMetadata {
                     if from + 1 == items.len() {
                         // The read marker has nothing after it. An item disappeared; remove it.
                         items.remove(from);
+                        self.all_remote_events.timeline_item_has_been_removed_at(from);
                     }
                     self.has_up_to_date_read_marker_item = true;
                     return;
@@ -1265,6 +1268,7 @@ impl TimelineMetadata {
 
                 let prev_len = items.len();
                 let read_marker = items.remove(from);
+                self.all_remote_events.timeline_item_has_been_removed_at(from);
 
                 // Only insert the read marker if it is not at the end of the timeline.
                 if to + 1 < prev_len {
@@ -1272,6 +1276,7 @@ impl TimelineMetadata {
                     // by one position by the remove call above, insert the fully-
                     // read marker at its previous position, rather than that + 1
                     items.insert(to, read_marker);
+                    self.all_remote_events.timeline_item_has_been_inserted_at(None, to);
                     self.has_up_to_date_read_marker_item = true;
                 } else {
                     self.has_up_to_date_read_marker_item = false;
@@ -1376,9 +1381,9 @@ impl AllRemoteEvents {
             .find(|(_event_index, event_meta)| event_meta.event_id == event_id)
     }
 
-    pub fn insert_timeline_item_index_at(
+    pub fn timeline_item_has_been_inserted_at(
         &mut self,
-        event_index: usize,
+        event_index: Option<usize>,
         new_timeline_item_index: usize,
     ) {
         for (current_event_index, event_meta) in self.0.iter_mut().enumerate() {
@@ -1392,13 +1397,15 @@ impl AllRemoteEvents {
 
             // This is the `event_meta` that must hold the `timeline_item_index` that is
             // being added. So let's add it.
-            if event_index == current_event_index {
-                event_meta.timeline_item_index = Some(new_timeline_item_index);
+            if let Some(event_index) = event_index {
+                if event_index == current_event_index {
+                    event_meta.timeline_item_index = Some(new_timeline_item_index);
+                }
             }
         }
     }
 
-    pub fn remove_timeline_item_index(&mut self, timeline_item_index_to_remove: usize) {
+    pub fn timeline_item_has_been_removed_at(&mut self, timeline_item_index_to_remove: usize) {
         for event_meta in self.0.iter_mut() {
             let mut remove_timeline_item_index = false;
 

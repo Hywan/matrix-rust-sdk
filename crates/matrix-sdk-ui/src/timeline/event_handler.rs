@@ -517,8 +517,8 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 // wouldn't normally be visible. Remove it.
                 trace!("Removing UTD that was successfully retried");
 
-                self.meta.all_remote_events.remove_timeline_item_index(timeline_item_index);
                 self.items.remove(timeline_item_index);
+                self.meta.all_remote_events.timeline_item_has_been_removed_at(timeline_item_index);
 
                 self.result.item_removed = true;
             }
@@ -1193,8 +1193,8 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                     TimelineItemPosition::Start { .. } => {
                         trace!("Adding new remote timeline item at the front");
 
-                        self.meta.all_remote_events.insert_timeline_item_index_at(0, 0);
                         self.items.push_front(new_item);
+                        self.meta.all_remote_events.timeline_item_has_been_inserted_at(Some(0), 0);
                     }
 
                     TimelineItemPosition::At { event_index, .. } => {
@@ -1235,10 +1235,11 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                             "Adding new remote timeline item at specific index"
                         );
 
-                        self.meta
-                            .all_remote_events
-                            .insert_timeline_item_index_at(event_index, timeline_item_index);
                         self.items.insert(timeline_item_index, new_item);
+                        self.meta.all_remote_events.timeline_item_has_been_inserted_at(
+                            Some(event_index),
+                            timeline_item_index,
+                        );
                     }
 
                     TimelineItemPosition::End { .. } => {
@@ -1281,11 +1282,11 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                             self.items.insert(timeline_item_index, new_item);
                         }
 
-                        self.meta.all_remote_events.insert_timeline_item_index_at(
-                            self.meta.all_remote_events.last_event_index()
+                        self.meta.all_remote_events.timeline_item_has_been_inserted_at(
+                            Some(self.meta.all_remote_events.last_event_index()
                                 // The last remote event is necessarily associated to this
                                 // timeline item, see the contract of this method.
-                                .expect("A timeline item is being added but its associated remote event is missing"),
+                                .expect("A timeline item is being added but its associated remote event is missing")),
                             timeline_item_index,
                         );
                     }
