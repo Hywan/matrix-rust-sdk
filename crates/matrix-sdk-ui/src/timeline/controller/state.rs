@@ -1344,9 +1344,9 @@ impl AllRemoteEvents {
         // A new `timeline_item_index` is inserted. Let's shift all
         // `timeline_item_index` that come after this new one.
         for event_meta in self.0.iter_mut() {
-            if let Some(timeline_itme_index) = event_meta.timeline_item_index.as_mut() {
-                if *timeline_itme_index >= new_timeline_item_index {
-                    *timeline_itme_index += 1;
+            if let Some(timeline_item_index) = event_meta.timeline_item_index.as_mut() {
+                if *timeline_item_index >= new_timeline_item_index {
+                    *timeline_item_index += 1;
                 }
             }
         }
