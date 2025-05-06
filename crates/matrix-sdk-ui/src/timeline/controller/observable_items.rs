@@ -1187,6 +1187,9 @@ mod observable_items_tests {
 
         let mut transaction = items.transaction();
 
+        // Push an item.
+        transaction.push_back(item("$ev0"), None);
+
         // Push the timeline start.
         transaction.push_timeline_start_if_missing(TimelineItem::new(
             VirtualTimelineItem::TimelineStart,
@@ -1194,7 +1197,7 @@ mod observable_items_tests {
         ));
 
         // Push another item.
-        transaction.push_back(item("$ev0"), None);
+        transaction.push_back(item("$ev1"), None);
 
         // Try to push the timeline start again.
         transaction.push_timeline_start_if_missing(TimelineItem::new(
@@ -1211,6 +1214,9 @@ mod observable_items_tests {
         });
         assert_matches!(entries.next(), Some(entry) => {
            assert_event_id!(entry, "$ev0");
+        });
+        assert_matches!(entries.next(), Some(entry) => {
+           assert_event_id!(entry, "$ev1");
         });
         assert_matches!(entries.next(), None);
     }
