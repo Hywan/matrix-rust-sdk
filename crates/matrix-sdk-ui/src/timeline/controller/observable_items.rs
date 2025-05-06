@@ -305,6 +305,10 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
 
     /// Push a new [`TimelineStart`] virtual timeline item.
     ///
+    /// # Invariant
+    ///
+    /// A [`TimelineStart`] is always the first item if present..
+    ///
     /// # Panics
     ///
     /// It panics if the provided `timeline_item` is not a [`TimelineStart`].
