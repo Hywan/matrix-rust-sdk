@@ -207,6 +207,7 @@ impl SlidingSyncResponseProcessor {
         let response = self.response.as_ref().unwrap();
 
         update_in_memory_caches(&self.client, response).await?;
+        update_unread_counts(&self.client, response).await?;
 
         Ok(())
     }
@@ -235,6 +236,30 @@ async fn update_in_memory_caches(client: &Client, response: &SyncResponse) -> Re
         room.user_defined_notification_mode().await;
     }
 
+    Ok(())
+}
+
+/// Rooms in `response` either have a timeline update, or a new read receipt.
+/// Update the read receipt accordingly.
+async fn update_unread_counts(client: &Client, response: &SyncResponse) -> Result<()> {
+    for (room_id, joined_room_update) in &response.rooms.joined {
+        let Ok((room_event_cache, _drop_handle)) = client.event_cache().for_room(room_id).await
+        else {
+            tracing::info!(
+                ?room_id,
+                "Failed to fetch the `RoomEventCache` when computing unread counts"
+            );
+
+            continue;
+        };
+
+        let previous_events = room_event_cache.events().await;
+
+        client
+            .base_client()
+            .compute_and_save_unread_counts_for_room(room_id, joined_room_update, previous_events)
+            .await?;
+    }
     Ok(())
 }
 

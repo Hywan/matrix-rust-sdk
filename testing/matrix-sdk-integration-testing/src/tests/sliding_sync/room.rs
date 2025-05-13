@@ -393,13 +393,15 @@ impl UpdateObserver {
     }
 }
 
-/*
 #[tokio::test]
 async fn test_room_notification_count() -> Result<()> {
     use tokio::time::timeout;
 
     let bob = TestClientBuilder::new("bob").use_sqlite().build().await?;
     let alice = TestClientBuilder::new("alice").use_sqlite().build().await?;
+
+    bob.event_cache().subscribe().unwrap();
+    alice.event_cache().subscribe().unwrap();
 
     // Spawn sync for Bob.
     spawn({
@@ -506,6 +508,8 @@ async fn test_room_notification_count() -> Result<()> {
         update_observer.assert_is_pending();
     }
 
+    eprintln!("aaa");
+
     // Bob sends a non-mention message.
     let bob_room = bob.get_room(&room_id).expect("bob knows about alice's room");
     bob_room.send(RoomMessageEventContent::text_plain("hello world")).await?;
@@ -525,6 +529,7 @@ async fn test_room_notification_count() -> Result<()> {
 
         update_observer.assert_is_pending();
     }
+    eprintln!("bbb");
 
     // Bob sends a mention message.
     bob_room
@@ -548,6 +553,7 @@ async fn test_room_notification_count() -> Result<()> {
 
         update_observer.assert_is_pending();
     }
+    eprintln!("ccc");
 
     // Alice marks the room as read.
     let event_id = latest_event.lock().await.take().unwrap().event_id().to_owned();
@@ -575,6 +581,7 @@ async fn test_room_notification_count() -> Result<()> {
 
         update_observer.assert_is_pending();
     }
+    eprintln!("cccCCC");
 
     // Alice sends a message.
     alice_room.send(RoomMessageEventContent::text_plain("hello bob")).await?;
@@ -591,6 +598,7 @@ async fn test_room_notification_count() -> Result<()> {
 
         update_observer.assert_is_pending();
     }
+    eprintln!("ddd");
 
     // Now Alice is only interesting in mentions of their name.
     let settings = alice.notification_settings().await;
@@ -643,7 +651,6 @@ async fn test_room_notification_count() -> Result<()> {
 
     Ok(())
 }
-*/
 
 /// Response preprocessor that drops to_device events
 fn drop_todevice_events(response: &mut Bytes) {

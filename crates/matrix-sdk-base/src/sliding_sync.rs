@@ -14,7 +14,8 @@
 
 //! Extend `BaseClient` with capabilities to handle MSC4186.
 
-use ruma::api::client::sync::sync_events::v5 as http;
+use matrix_sdk_common::deserialized_responses::TimelineEvent;
+use ruma::{api::client::sync::sync_events::v5 as http, OwnedRoomId};
 #[cfg(feature = "e2e-encryption")]
 use ruma::{events::AnyToDeviceEvent, serde::Raw};
 use tracing::{instrument, trace};
@@ -22,10 +23,11 @@ use tracing::{instrument, trace};
 use super::BaseClient;
 use crate::{
     error::Result,
+    read_receipts::compute_unread_counts,
     response_processors as processors,
     rooms::normal::RoomInfoNotableUpdateReasons,
     store::ambiguity_map::AmbiguityCache,
-    sync::{RoomUpdates, SyncResponse},
+    sync::{JoinedRoomUpdate, RoomUpdates, SyncResponse},
     RequestedRequiredStates,
 };
 
@@ -211,43 +213,6 @@ impl BaseClient {
         )
         .await;
 
-        // Rooms in `room_updates.joined` either have a timeline update, or a new read
-        // receipt. Update the read receipt accordingly.
-        // let user_id = &self.session_meta().expect("logged in user").user_id;
-
-        for (room_id, _joined_room_update) in &mut room_updates.joined {
-            if let Some(room_info) = context
-                .state_changes
-                .room_infos
-                .get(room_id)
-                .cloned()
-                .or_else(|| self.get_room(room_id).map(|r| r.clone_info()))
-            {
-                let prev_read_receipts = room_info.read_receipts.clone();
-
-                /*
-                compute_unread_counts(
-                    user_id,
-                    room_id,
-                    context.state_changes.receipts.get(room_id),
-                    previous_events_provider.for_room(room_id),
-                    &joined_room_update.timeline.events,
-                    &mut room_info.read_receipts,
-                );
-                */
-
-                if prev_read_receipts != room_info.read_receipts {
-                    context
-                        .room_info_notable_updates
-                        .entry(room_id.clone())
-                        .or_default()
-                        .insert(RoomInfoNotableUpdateReasons::READ_RECEIPT);
-
-                    context.state_changes.add_room(room_info);
-                }
-            }
-        }
-
         global_account_data_processor.apply(&mut context, &state_store).await;
 
         context.state_changes.ambiguity_maps = ambiguity_cache.cache;
@@ -282,6 +247,58 @@ impl BaseClient {
             account_data: extensions.account_data.global.clone(),
             to_device: Default::default(),
         })
+    }
+
+    /// Compute and save the unread counts based on read receipts, for a
+    /// particular room.
+    #[doc(hidden)]
+    pub async fn compute_and_save_unread_counts_for_room(
+        &self,
+        room_id: &OwnedRoomId,
+        joined_room_update: &JoinedRoomUpdate,
+        room_previous_events: Vec<TimelineEvent>,
+    ) -> Result<()> {
+        let mut context = processors::Context::default();
+
+        // Rooms in `room_updates.joined` either have a timeline update, or a new read
+        // receipt. Update the read receipt accordingly.
+        let user_id = &self.session_meta().expect("logged in user").user_id;
+
+        if let Some(mut room_info) = context
+            .state_changes
+            .room_infos
+            .get(room_id)
+            .cloned()
+            .or_else(|| self.get_room(room_id).map(|r| r.clone_info()))
+        {
+            let prev_read_receipts = room_info.read_receipts.clone();
+
+            eprintln!("ALMOST THEREEEEE \\o/");
+
+            compute_unread_counts(
+                user_id,
+                room_id,
+                context.state_changes.receipts.get(room_id),
+                room_previous_events,
+                &joined_room_update.timeline.events,
+                &mut room_info.read_receipts,
+            );
+
+            if dbg!(prev_read_receipts != room_info.read_receipts) {
+                context
+                    .room_info_notable_updates
+                    .entry(room_id.clone())
+                    .or_default()
+                    .insert(RoomInfoNotableUpdateReasons::READ_RECEIPT);
+
+                context.state_changes.add_room(room_info);
+            }
+        }
+
+        // Save the new `RoomInfo` if updated.
+        processors::changes::save_only(context, &self.state_store).await?;
+
+        Ok(())
     }
 }
 
@@ -1903,8 +1920,7 @@ mod tests {
             room_info_notable_update_stream.recv().await,
             Ok(RoomInfoNotableUpdate { room_id: received_room_id, reasons: received_reasons }) => {
                 assert_eq!(received_room_id, room_id);
-                // assert!(received_reasons.contains(RoomInfoNotableUpdateReasons::READ_RECEIPT));
-                assert!(received_reasons.contains(RoomInfoNotableUpdateReasons::NONE));
+                assert!(received_reasons.contains(RoomInfoNotableUpdateReasons::READ_RECEIPT));
             }
         );
         assert!(room_info_notable_update_stream.is_empty());
