@@ -30,7 +30,7 @@ use ruma::{
         AnyMessageLikeEventContent, AnySyncMessageLikeEvent, AnySyncStateEvent,
         AnySyncTimelineEvent, SyncStateEvent,
     },
-    EventId, OwnedEventId, OwnedRoomId, OwnedTransactionId, RoomId, TransactionId, UserId,
+    EventId, OwnedEventId, OwnedTransactionId, TransactionId, UserId,
 };
 use tracing::error;
 
@@ -42,7 +42,7 @@ use crate::{event_cache::RoomEventCache, room::WeakRoom, send_queue::RoomSendQue
 #[derive(Debug)]
 pub(super) struct LatestEvent {
     /// The room owning this latest event.
-    _room_id: OwnedRoomId,
+    _weak_room: WeakRoom,
 
     /// The thread (if any) owning this latest event.
     _thread_id: Option<OwnedEventId>,
@@ -58,13 +58,12 @@ pub(super) struct LatestEvent {
 
 impl LatestEvent {
     pub(super) async fn new(
-        room_id: &RoomId,
+        weak_room: &WeakRoom,
         thread_id: Option<&EventId>,
         room_event_cache: &RoomEventCache,
-        weak_room: &WeakRoom,
     ) -> Self {
         Self {
-            _room_id: room_id.to_owned(),
+            _weak_room: weak_room.clone(),
             _thread_id: thread_id.map(ToOwned::to_owned),
             buffer_of_values_for_local_events: LatestEventValuesForLocalEvents::new(),
             current_value: SharedObservable::new_async(
@@ -1179,7 +1178,7 @@ mod tests_latest_event_value_non_wasm {
 
         let (room_event_cache, _) = event_cache.for_room(room_id).await.unwrap();
 
-        let mut latest_event = LatestEvent::new(room_id, None, &room_event_cache, &weak_room).await;
+        let mut latest_event = LatestEvent::new(&weak_room, None, &room_event_cache).await;
 
         // First off, check the default value is `None`!
         assert_matches!(latest_event.current_value.get().await, LatestEventValue::None);
