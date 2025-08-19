@@ -2,7 +2,15 @@
 //! use as a [crate::Room::latest_event].
 
 use matrix_sdk_common::deserialized_responses::TimelineEvent;
-use ruma::{MxcUri, OwnedEventId};
+use ruma::{
+    MxcUri, OwnedEventId,
+    events::{
+        call::{invite::CallInviteEventContent, notify::CallNotifyEventContent},
+        poll::unstable_start::UnstablePollStartEventContent,
+        room::{member::RoomMemberEventContent, message::RoomMessageEventContent},
+        sticker::StickerEventContent,
+    },
+};
 #[cfg(feature = "e2e-encryption")]
 use ruma::{
     UserId,
@@ -694,4 +702,48 @@ mod tests {
         assert!(deserialized.latest_event.sender_profile.is_none());
         assert!(deserialized.latest_event.sender_name_is_ambiguous.is_none());
     }
+}
+
+/// A latest event value!
+#[derive(Debug, Default, Clone)]
+pub enum LatestEventValue {
+    /// No value has been computed yet, or no candidate value was found.
+    #[default]
+    None,
+
+    /// The latest event represents a remote event.
+    Remote(LatestEventContent),
+
+    /// The latest event represents a local event that is sending.
+    LocalIsSending(LatestEventContent),
+
+    /// The latest event represents a local event that cannot be sent, either
+    /// because a previous local event, or this local event cannot be sent.
+    LocalCannotBeSent(LatestEventContent),
+}
+
+/// A latest event value content!
+#[derive(Debug, Clone)]
+pub enum LatestEventContent {
+    /// A `m.room.message` event.
+    RoomMessage(RoomMessageEventContent),
+
+    /// A `m.sticker` event.
+    Sticker(StickerEventContent),
+
+    /// An `org.matrix.msc3381.poll.start` event.
+    Poll(UnstablePollStartEventContent),
+
+    /// A `m.call.invite` event.
+    CallInvite(CallInviteEventContent),
+
+    /// A `m.call.notify` event.
+    CallNotify(CallNotifyEventContent),
+
+    /// A `m.room.member` event, more precisely a knock membership change that
+    /// can be handled by the current user.
+    KnockedStateEvent(RoomMemberEventContent),
+
+    /// A redacted event.
+    Redacted(AnySyncMessageLikeEvent),
 }
