@@ -804,6 +804,12 @@ impl<P: RoomDataProvider> TimelineController<P> {
         state.prepend_remote_gap(prev_token, origin, &self.room_data_provider, &self.settings).await
     }
 
+    /// Handle the removal of a gap.
+    pub(super) async fn remove_remote_gap(&self, prev_token: Option<String>) {
+        let mut state = self.state.write().await;
+        state.remove_remote_gap(prev_token, &self.room_data_provider, &self.settings).await
+    }
+
     /// Only handle aggregations received as [`VectorDiff`]s.
     pub(super) async fn handle_remote_aggregations(
         &self,

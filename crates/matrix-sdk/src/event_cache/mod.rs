@@ -1172,6 +1172,12 @@ pub enum RoomEventCacheUpdate {
         origin: EventsOrigin,
     },
 
+    /// A timeline gap has been resolved and should be removed.
+    RemoveTimelineGap {
+        /// The previous batch token used by the gap.
+        prev_token: Option<String>,
+    },
+
     /// The room has received new ephemeral events.
     AddEphemeralEvents {
         /// XXX: this is temporary, until read receipts are handled in the event

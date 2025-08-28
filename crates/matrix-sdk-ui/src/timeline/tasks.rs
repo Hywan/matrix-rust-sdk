@@ -196,6 +196,14 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
                 }
             }
 
+            RoomEventCacheUpdate::RemoveTimelineGap { prev_token } => {
+                trace!("Received a request to remove a timeline gap");
+
+                if matches!(timeline_focus, TimelineFocus::Live { .. }) {
+                    timeline_controller.remove_remote_gap(prev_token).await;
+                }
+            }
+
             RoomEventCacheUpdate::AddEphemeralEvents { events } => {
                 trace!("Received new ephemeral events from sync.");
 

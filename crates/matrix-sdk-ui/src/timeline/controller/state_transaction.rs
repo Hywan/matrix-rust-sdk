@@ -200,6 +200,20 @@ impl<'a, P: RoomDataProvider> TimelineStateTransaction<'a, P> {
         self.check_invariants();
     }
 
+    pub(super) async fn remove_remote_gap(
+        &mut self,
+        prev_token: Option<String>,
+        _room_data_provider: &P,
+        settings: &TimelineSettings,
+    ) {
+        let date_divider_adjuster = DateDividerAdjuster::new(settings.date_divider_mode.clone());
+
+        self.items.remove_gap(prev_token);
+
+        self.adjust_date_dividers(date_divider_adjuster);
+        self.check_invariants();
+    }
+
     async fn handle_remote_aggregation(
         &mut self,
         event: TimelineEvent,

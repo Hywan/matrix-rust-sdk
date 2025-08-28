@@ -29,6 +29,7 @@ use imbl::Vector;
 use ruma::EventId;
 
 use super::{TimelineItem, metadata::EventMeta};
+use crate::timeline::{TimelineItemKind, VirtualTimelineItem};
 
 /// An `ObservableItems` is a type similar to
 /// [`ObservableVector<Arc<TimelineItem>>`] except the API is limited and,
@@ -440,6 +441,28 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
         assert!(timeline_item.is_gap(), "The provided `timeline_item` is not a `Gap`");
 
         self.insert(self.first_remotes_region_index(), timeline_item, None);
+    }
+
+    /// Remove a [`Gap`] virtual timeline item identified by its `prev_token`.
+    ///
+    /// [`Gap`]: super::VirtualTimelineItem::Gap
+    pub fn remove_gap(&mut self, prev_token: Option<String>) {
+        // The gap is more likely to be at the start of the timeline. Let's traverse
+        // items forwards.
+        let Some((timeline_item_index, _)) =
+            self.iter_remotes_region().find(|(_, timeline_item)| {
+                matches!(
+                    timeline_item.kind(),
+                    TimelineItemKind::Virtual(VirtualTimelineItem::Gap {
+                        prev_token: candidate_prev_token
+                    }) if candidate_prev_token == &prev_token
+                )
+            })
+        else {
+            return;
+        };
+
+        self.remove(timeline_item_index);
     }
 
     /// Clear all timeline items and all remote events.
