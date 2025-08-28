@@ -899,6 +899,9 @@ impl TimelineItem {
             VItem::DateDivider(ts) => Some(VirtualTimelineItem::DateDivider { ts: (*ts).into() }),
             VItem::ReadMarker => Some(VirtualTimelineItem::ReadMarker),
             VItem::TimelineStart => Some(VirtualTimelineItem::TimelineStart),
+            VItem::Gap { prev_token } => {
+                Some(VirtualTimelineItem::Gap { prev_token: prev_token.clone() })
+            }
         }
     }
 
@@ -1174,6 +1177,13 @@ pub enum VirtualTimelineItem {
 
     /// The timeline start, that is, the *oldest* event in time for that room.
     TimelineStart,
+
+    /// A gap in the timeline.
+    Gap {
+        /// The previous batch token to be used as the `end` parameter in the
+        /// back-pagination request.
+        prev_token: String,
+    },
 }
 
 /// A [`TimelineItem`](super::TimelineItem) that doesn't correspond to an event.

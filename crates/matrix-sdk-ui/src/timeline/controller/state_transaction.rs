@@ -776,9 +776,9 @@ impl<'a, P: RoomDataProvider> TimelineStateTransaction<'a, P> {
                 if entry.is_remote_event()
                     || entry.as_virtual().is_some_and(|vitem| match vitem {
                         VirtualTimelineItem::DateDivider(_) => false,
-                        VirtualTimelineItem::ReadMarker | VirtualTimelineItem::TimelineStart => {
-                            true
-                        }
+                        VirtualTimelineItem::ReadMarker
+                        | VirtualTimelineItem::TimelineStart
+                        | VirtualTimelineItem::Gap { .. } => true,
                     })
                 {
                     ObservableItemsTransactionEntry::remove(entry);

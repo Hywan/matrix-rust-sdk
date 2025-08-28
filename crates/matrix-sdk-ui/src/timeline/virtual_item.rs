@@ -30,4 +30,11 @@ pub enum VirtualTimelineItem {
     /// The timeline start, that is, an indication that we've seen all the
     /// events for that timeline.
     TimelineStart,
+
+    /// A gap in the timeline.
+    Gap {
+        /// The previous batch token to be used as the `end` parameter in the
+        /// back-pagination request.
+        prev_token: String,
+    },
 }

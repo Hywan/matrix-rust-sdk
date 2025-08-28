@@ -131,10 +131,12 @@ fn format_timeline_item(item: &Arc<TimelineItem>, is_thread: bool) -> Option<Lis
         }
 
         TimelineItemKind::Virtual(virt) => match virt {
-            VirtualTimelineItem::DateDivider(unix_ts) => format!("Date: {unix_ts:?}").into(),
-            VirtualTimelineItem::ReadMarker => "Read marker".to_owned().into(),
-            VirtualTimelineItem::TimelineStart => "🥳 Timeline start! 🥳".to_owned().into(),
-        },
+            VirtualTimelineItem::DateDivider(unix_ts) => format!("Date: {unix_ts:?}"),
+            VirtualTimelineItem::ReadMarker => "Read marker".to_owned(),
+            VirtualTimelineItem::TimelineStart => "🥳 Timeline start! 🥳".to_owned(),
+            VirtualTimelineItem::Gap { .. } => "——— Gap ———".to_owned(),
+        }
+        .into(),
     };
 
     Some(item)
