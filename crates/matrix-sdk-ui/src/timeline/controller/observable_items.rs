@@ -439,10 +439,7 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
     pub fn prepend_gap(&mut self, timeline_item: Arc<TimelineItem>) {
         assert!(timeline_item.is_gap(), "The provided `timeline_item` is not a `Gap`");
 
-        let timeline_item_index =
-            if self.get(0).is_some_and(|item| item.is_timeline_start()) { 1 } else { 0 };
-
-        self.insert(timeline_item_index, timeline_item, None);
+        self.insert(self.first_remotes_region_index(), timeline_item, None);
     }
 
     /// Clear all timeline items and all remote events.
