@@ -92,17 +92,19 @@ impl RoomPagination {
         &self,
         num_requested_events: u16,
     ) -> Result<BackPaginationOutcome> {
-        let mut events = Vec::new();
+        let mut events = Vec::with_capacity(num_requested_events.into());
 
         loop {
             if let Some(outcome) = self.run_backwards_impl(num_requested_events).await? {
                 events.extend(outcome.events);
+
                 if outcome.reached_start || events.len() >= num_requested_events as usize {
                     return Ok(BackPaginationOutcome {
                         reached_start: outcome.reached_start,
                         events,
                     });
                 }
+
                 trace!(
                     "restarting back-pagination, because we haven't reached \
                      the start or obtained enough events yet"
