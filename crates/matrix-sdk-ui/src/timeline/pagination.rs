@@ -26,25 +26,19 @@ impl super::Timeline {
     ///
     /// Returns whether we hit the start of the timeline.
     #[instrument(skip_all, fields(room_id = ?self.room().room_id()))]
-    pub async fn paginate_backwards(&self, mut num_events: u16) -> Result<bool, Error> {
+    pub async fn paginate_backwards(&self, num_events: u16) -> Result<bool, Error> {
         if self.controller.is_live() {
             match self.controller.live_lazy_paginate_backwards(num_events).await {
-                Some(needed_num_events) => {
-                    num_events = needed_num_events.try_into().expect(
-                        "failed to cast `needed_num_events` (`usize`) into `num_events` (`usize`)",
-                    );
-                }
+                Some(_) => Ok(self.live_paginate_backwards().await?),
                 None => {
                     // We could adjust the skip count to a lower value, while passing the requested
                     // number of events. We *may* have reached the start of the timeline, but since
                     // we're fulfilling the caller's request, assume it's not the case and return
                     // false here. A subsequent call will go to the `Some()` arm of this match, and
                     // cause a call to the event cache's pagination.
-                    return Ok(false);
+                    Ok(false)
                 }
             }
-
-            Ok(self.live_paginate_backwards(num_events).await?)
         } else if let Some(thread_root) = self.controller.thread_root() {
             // Note: in the future (when the event cache implements persistent storage for
             // threads), we might need to load the related events too here.
@@ -72,9 +66,9 @@ impl super::Timeline {
     /// on a specific event.
     ///
     /// Returns whether we hit the start of the timeline.
-    async fn live_paginate_backwards(&self, batch_size: u16) -> event_cache::Result<bool> {
+    async fn live_paginate_backwards(&self) -> event_cache::Result<bool> {
         loop {
-            match self.event_cache.pagination().run_backwards_once(batch_size).await {
+            match self.event_cache.pagination().run_backwards_once().await {
                 Ok(outcome) => {
                     // As an exceptional contract, restart the back-pagination if we received an
                     // empty chunk.
@@ -82,6 +76,7 @@ impl super::Timeline {
                         if outcome.reached_start {
                             self.controller.insert_timeline_start_if_missing().await;
                         }
+
                         return Ok(outcome.reached_start);
                     }
                 }

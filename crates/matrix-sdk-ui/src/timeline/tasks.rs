@@ -192,6 +192,10 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
                 }
             }
 
+            RoomEventCacheUpdate::PrependTimelineGap { .. } => {
+                todo!()
+            }
+
             RoomEventCacheUpdate::AddEphemeralEvents { events } => {
                 trace!("Received new ephemeral events from sync.");
 

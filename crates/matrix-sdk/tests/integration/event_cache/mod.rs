@@ -276,7 +276,7 @@ async fn test_backpaginate_once() {
             .await;
 
         // Then if I backpaginate,
-        room_event_cache.pagination().run_backwards_once(20).await.unwrap()
+        room_event_cache.pagination().run_backwards_once().await.unwrap()
     };
 
     // I'll get all the previous events, in "reverse" order (same as the response).
@@ -308,7 +308,7 @@ async fn test_backpaginate_once() {
     assert!(room_stream.is_empty());
 
     // Another back-pagination doesn't return any new information.
-    let outcome = room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+    let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
     assert!(outcome.events.is_empty());
     assert!(outcome.reached_start);
 }
@@ -378,7 +378,7 @@ async fn test_backpaginate_many_times_with_many_iterations() {
     // Then if I backpaginate in a loop,
     let pagination = room_event_cache.pagination();
     loop {
-        let outcome = pagination.run_backwards_once(20).await.unwrap();
+        let outcome = pagination.run_backwards_once().await.unwrap();
         global_events.extend(outcome.events);
         num_iterations += 1;
         if outcome.reached_start {
@@ -627,7 +627,7 @@ async fn test_reset_while_backpaginating() {
     // Run the pagination!
     let backpagination = spawn({
         let pagination = room_event_cache.pagination();
-        async move { pagination.run_backwards_once(20).await }
+        async move { pagination.run_backwards_once().await }
     });
 
     // Receive the sync response (which clears the timeline).
@@ -717,7 +717,7 @@ async fn test_backpaginating_without_token() {
     // If we try to back-paginate with a token, it will hit the end of the timeline
     // and give us the resulting event.
     let BackPaginationOutcome { events, reached_start } =
-        pagination.run_backwards_once(20).await.unwrap();
+        pagination.run_backwards_once().await.unwrap();
 
     assert!(reached_start);
 
@@ -776,7 +776,7 @@ async fn test_limited_timeline_resets_pagination() {
     // If we try to back-paginate with a token, it will hit the end of the timeline
     // and give us the resulting event.
     let BackPaginationOutcome { events, reached_start } =
-        pagination.run_backwards_once(20).await.unwrap();
+        pagination.run_backwards_once().await.unwrap();
 
     assert_eq!(events.len(), 1);
     assert!(reached_start);
@@ -961,7 +961,7 @@ async fn test_backpaginate_with_no_initial_events() {
     // timeline.
     let pagination_clone = pagination.clone();
 
-    let first_pagination = spawn(async move { pagination_clone.run_backwards_once(20).await });
+    let first_pagination = spawn(async move { pagination_clone.run_backwards_once().await });
 
     // Make sure we've waited for the initial token long enough (3 seconds, as of
     // 2024-12-16).
@@ -977,7 +977,7 @@ async fn test_backpaginate_with_no_initial_events() {
     first_pagination.await.expect("joining must work").expect("first backpagination must work");
 
     // Second pagination will be instant.
-    pagination.run_backwards_once(20).await.unwrap();
+    pagination.run_backwards_once().await.unwrap();
 
     // The linked chunk should contain the events in the correct order.
     let events = room_event_cache.events().await;
@@ -1039,8 +1039,8 @@ async fn test_backpaginate_replace_empty_gap() {
     let pagination = room_event_cache.pagination();
 
     // Run pagination twice.
-    pagination.run_backwards_once(20).await.unwrap();
-    pagination.run_backwards_once(20).await.unwrap();
+    pagination.run_backwards_once().await.unwrap();
+    pagination.run_backwards_once().await.unwrap();
 
     // The linked chunk should contain the events in the correct order.
     let events = room_event_cache.events().await;
@@ -1107,7 +1107,7 @@ async fn test_no_gap_stored_after_deduplicated_sync() {
     // The first back-pagination will hit the network, and let us know we've reached
     // the end of the room.
 
-    let outcome = pagination.run_backwards_once(20).await.unwrap();
+    let outcome = pagination.run_backwards_once().await.unwrap();
     assert!(outcome.reached_start);
     assert!(outcome.events.is_empty());
 
@@ -1140,7 +1140,7 @@ async fn test_no_gap_stored_after_deduplicated_sync() {
     // The sync was limited, which unloaded the linked chunk, and reloaded only the
     // final events chunk.
 
-    let outcome = pagination.run_backwards_once(20).await.unwrap();
+    let outcome = pagination.run_backwards_once().await.unwrap();
     assert!(outcome.events.is_empty());
     assert!(outcome.reached_start);
 
@@ -1237,7 +1237,7 @@ async fn test_no_gap_stored_after_deduplicated_backpagination() {
     // start *yet*.
     let pagination = room_event_cache.pagination();
 
-    let outcome = pagination.run_backwards_once(20).await.unwrap();
+    let outcome = pagination.run_backwards_once().await.unwrap();
     assert!(outcome.reached_start.not());
     assert!(outcome.events.is_empty());
     assert!(stream.is_empty());
@@ -1258,7 +1258,7 @@ async fn test_no_gap_stored_after_deduplicated_backpagination() {
 
     // Run pagination a second time: it will consume prev-batch, which is the least
     // recent token.
-    let outcome = pagination.run_backwards_once(20).await.unwrap();
+    let outcome = pagination.run_backwards_once().await.unwrap();
     assert!(outcome.reached_start);
     assert!(outcome.events.is_empty());
     assert!(stream.is_empty());
@@ -1319,7 +1319,7 @@ async fn test_dont_delete_gap_that_wasnt_inserted() {
         .mock_once()
         .mount()
         .await;
-    room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+    room_event_cache.pagination().run_backwards_once().await.unwrap();
 
     // This doesn't cause an update, because nothing changed.
     assert!(stream.is_empty());
@@ -2281,7 +2281,7 @@ async fn test_timeline_then_empty_timeline_then_deduplication_with_storage() {
         .mount()
         .await;
 
-    let outcome = room_event_cache.pagination().run_backwards_once(10).await.unwrap();
+    let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
     assert!(outcome.reached_start.not());
     assert_eq!(outcome.events.len(), 6);
 
@@ -2332,7 +2332,7 @@ async fn test_dont_remove_only_gap() {
         .await;
 
     // Back-paginate with the given token.
-    let outcome = room_event_cache.pagination().run_backwards_once(16).await.unwrap();
+    let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
     assert!(outcome.reached_start);
 }
 
@@ -2495,7 +2495,7 @@ async fn test_sync_while_back_paginate() {
     // Spawn back pagination.
     let pagination = room_event_cache.pagination();
     let back_pagination_handle =
-        spawn(async move { pagination.run_backwards_once(3).await.unwrap() });
+        spawn(async move { pagination.run_backwards_once().await.unwrap() });
 
     // Receive a non-limited sync while back pagination is happening.
     server
@@ -2654,14 +2654,14 @@ async fn test_relations_ordering() {
         .await;
 
     // Run the pagination.
-    let outcome = room_event_cache.pagination().run_backwards_once(1).await.unwrap();
+    let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
     assert!(outcome.reached_start.not());
     assert_eq!(outcome.events.len(), 1);
 
     {
         // Sanity check: we load the first chunk with the first event, from disk, and
         // reach the start of the timeline.
-        let outcome = room_event_cache.pagination().run_backwards_once(1).await.unwrap();
+        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
         assert!(outcome.reached_start);
     }
 

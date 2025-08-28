@@ -95,7 +95,7 @@ impl RoomPagination {
         let mut events = Vec::with_capacity(num_requested_events.into());
 
         loop {
-            if let Some(mut outcome) = self.run_backwards_impl(num_requested_events).await? {
+            if let Some(mut outcome) = self.run_backwards_impl().await? {
                 events.append(&mut outcome.events);
 
                 if outcome.reached_start || events.len() >= num_requested_events as usize {
@@ -115,28 +115,27 @@ impl RoomPagination {
         }
     }
 
-    /// Run a single back-pagination for the requested number of events.
+    /// Run a single back-pagination.
     ///
     /// This automatically takes care of waiting for a pagination token from
     /// sync, if we haven't done that before.
     #[instrument(skip(self))]
-    pub async fn run_backwards_once(&self, batch_size: u16) -> Result<BackPaginationOutcome> {
+    pub async fn run_backwards_once(&self) -> Result<BackPaginationOutcome> {
         loop {
-            if let Some(outcome) = self.run_backwards_impl(batch_size).await? {
+            if let Some(outcome) = self.run_backwards_impl().await? {
                 return Ok(outcome);
             }
             debug!("restarting back-pagination because of a timeline reset.");
         }
     }
 
-    /// Paginate from either the storage or the network, and let pagination
-    /// status observers know about updates.
-    async fn run_backwards_impl(&self, batch_size: u16) -> Result<Option<BackPaginationOutcome>> {
-        // There is at least one gap that must be resolved; reach the network.
-        // First, ensure there's no other ongoing back-pagination.
+    /// Paginate from the storage, and let pagination status observers know
+    /// about updates.
+    async fn run_backwards_impl(&self) -> Result<Option<BackPaginationOutcome>> {
+        // First off, ensure there's no other ongoing back-pagination.
         let status_observable = &self.inner.pagination_status;
-
         let prev_status = status_observable.set(RoomPaginationStatus::Paginating);
+
         if !matches!(prev_status, RoomPaginationStatus::Idle { .. }) {
             return Err(EventCacheError::AlreadyBackpaginating);
         }
@@ -146,7 +145,7 @@ impl RoomPagination {
             pagination_status: status_observable.clone(),
         };
 
-        match self.paginate_backwards_impl(batch_size).await? {
+        match self.paginate_backwards_impl().await? {
             Some(outcome) => {
                 // Back-pagination's over and successful, don't reset the status to the previous
                 // value.
@@ -167,17 +166,14 @@ impl RoomPagination {
         }
     }
 
-    /// Paginate from either the storage or the network.
+    /// Paginate from the storage.
     ///
     /// This method isn't concerned with setting the pagination status; only the
     /// caller is.
-    async fn paginate_backwards_impl(
-        &self,
-        batch_size: u16,
-    ) -> Result<Option<BackPaginationOutcome>> {
+    async fn paginate_backwards_impl(&self) -> Result<Option<BackPaginationOutcome>> {
         // A linked chunk might not be entirely loaded (if it's been lazy-loaded). Try
-        // to load from storage first, then from network if storage indicated
-        // there's no previous events chunk to load.
+        // to load from storage first. We load nothing from the network: gaps are
+        // resolved manually.
 
         loop {
             let mut state_guard = self.inner.state.write().await;
@@ -211,10 +207,16 @@ impl RoomPagination {
                     continue;
                 }
 
-                LoadMoreEventsBackwardsOutcome::Gap { prev_token } => {
-                    // We have a gap, so resolve it with a network back-pagination.
-                    drop(state_guard);
-                    return self.paginate_backwards_with_network(batch_size, prev_token).await;
+                LoadMoreEventsBackwardsOutcome::Gap {
+                    reached_on_disk_start: reached_start,
+                    prev_token,
+                } => {
+                    let _ = self.inner.sender.send(RoomEventCacheUpdate::PrependTimelineGap {
+                        prev_token,
+                        origin: EventsOrigin::Cache,
+                    });
+
+                    return Ok(Some(BackPaginationOutcome { reached_start, events: vec![] }));
                 }
 
                 LoadMoreEventsBackwardsOutcome::StartOfTimeline => {
@@ -224,7 +226,7 @@ impl RoomPagination {
                 LoadMoreEventsBackwardsOutcome::Events {
                     events,
                     timeline_event_diffs,
-                    reached_start,
+                    reached_on_disk_start: reached_start,
                 } => {
                     if !timeline_event_diffs.is_empty() {
                         let _ =
@@ -251,6 +253,7 @@ impl RoomPagination {
         }
     }
 
+    /*
     /// Run a single pagination request (/messages) to the server.
     ///
     /// If there are no previous-batch tokens, it will wait for one for a short
@@ -304,6 +307,7 @@ impl RoomPagination {
             Ok(None)
         }
     }
+    */
 
     /// Returns a subscriber to the pagination status used for the
     /// back-pagination integrated to the event cache.

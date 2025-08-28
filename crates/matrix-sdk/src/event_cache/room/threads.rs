@@ -156,7 +156,10 @@ impl ThreadEventCache {
         // resolve the gap.
         if let Some(prev_token) = self.chunk.rgap().map(|gap| gap.prev_token) {
             trace!(%prev_token, "thread chunk has at least a gap");
-            return LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(prev_token) };
+            return LoadMoreEventsBackwardsOutcome::Gap {
+                prev_token: Some(prev_token),
+                reached_on_disk_start: false,
+            };
         }
 
         // If we don't have a gap, then the first event should be the the thread's root;
@@ -173,7 +176,7 @@ impl ThreadEventCache {
 
         // Otherwise, we don't have a gap nor events. We don't have anything. Poor us.
         // Well, is ok: start a pagination from the end.
-        LoadMoreEventsBackwardsOutcome::Gap { prev_token: None }
+        LoadMoreEventsBackwardsOutcome::Gap { prev_token: None, reached_on_disk_start: true }
     }
 
     /// Find duplicates in a thread, until there's persistent storage for

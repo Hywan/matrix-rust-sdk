@@ -1140,6 +1140,16 @@ pub enum RoomEventCacheUpdate {
         origin: EventsOrigin,
     },
 
+    /// A new timeline gap is inserted at the start of the timeline.
+    PrependTimelineGap {
+        /// The previous batch token to be used as the `end` parameter in the
+        /// back-pagination request.
+        prev_token: Option<String>,
+
+        /// Where the gap is coming from.
+        origin: EventsOrigin,
+    },
+
     /// The room has received new ephemeral events.
     AddEphemeralEvents {
         /// XXX: this is temporary, until read receipts are handled in the event
@@ -1477,7 +1487,7 @@ mod tests {
         let pagination = room_event_cache.pagination();
 
         // Paginate, it gets one new event in the timeline.
-        let pagination_outcome = pagination.run_backwards_once(1).await.unwrap();
+        let pagination_outcome = pagination.run_backwards_once().await.unwrap();
 
         assert_eq!(pagination_outcome.events.len(), 1);
         assert!(pagination_outcome.reached_start.not());
@@ -1489,14 +1499,14 @@ mod tests {
         );
 
         // Paginate, it gets zero new event in the timeline.
-        let pagination_outcome = pagination.run_backwards_once(1).await.unwrap();
+        let pagination_outcome = pagination.run_backwards_once().await.unwrap();
 
         assert!(pagination_outcome.events.is_empty());
         assert!(pagination_outcome.reached_start.not());
         assert!(generic_stream.recv().now_or_never().is_none());
 
         // Paginate once more. Just checking our scenario is correct.
-        let pagination_outcome = pagination.run_backwards_once(1).await.unwrap();
+        let pagination_outcome = pagination.run_backwards_once().await.unwrap();
 
         assert!(pagination_outcome.reached_start);
         assert!(generic_stream.recv().now_or_never().is_none());

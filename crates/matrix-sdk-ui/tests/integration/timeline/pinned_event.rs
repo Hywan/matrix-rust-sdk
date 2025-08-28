@@ -397,7 +397,7 @@ async fn test_pinned_timeline_with_no_pinned_events_on_pagination_is_just_empty(
     // Paginate backwards once using the event cache to load the event
     event_cache
         .pagination()
-        .run_backwards_once(10)
+        .run_backwards_once()
         .await
         .expect("Pagination of events should successful");
 

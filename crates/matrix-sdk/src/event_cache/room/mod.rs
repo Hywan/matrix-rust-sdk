@@ -244,7 +244,7 @@ impl RoomEventCache {
 
         loop {
             match outcome {
-                LoadMoreEventsBackwardsOutcome::Gap { prev_token } => {
+                LoadMoreEventsBackwardsOutcome::Gap { prev_token, .. } => {
                     // Start a threaded pagination from this gap.
                     let options = RelationsOptions {
                         from: prev_token.clone(),
@@ -587,13 +587,25 @@ pub(super) enum LoadMoreEventsBackwardsOutcome {
         /// The previous batch token to be used as the `end` parameter in the
         /// back-pagination request.
         prev_token: Option<String>,
+
+        /// Whether the on-disk start of the linked chunk has been reached.
+        reached_on_disk_start: bool,
     },
 
     /// The start of the timeline has been reached.
     StartOfTimeline,
 
     /// Events have been inserted.
-    Events { events: Vec<Event>, timeline_event_diffs: Vec<VectorDiff<Event>>, reached_start: bool },
+    Events {
+        /// The new events.
+        events: Vec<Event>,
+
+        /// The timeline updates as [`VectorDiff`]s.
+        timeline_event_diffs: Vec<VectorDiff<Event>>,
+
+        /// Whether the on-disk start of the linked chunk has been reached.
+        reached_on_disk_start: bool,
+    },
 
     /// The caller must wait for the initial previous-batch token, and retry.
     WaitForInitialPrevToken,
@@ -917,11 +929,15 @@ mod private {
             // received a sync for that room, because every room must have at least a room
             // creation event.
 
-            // If the first chunk is a gap, the linked chunk can still receive more events.
+            // If the first chunk is a gap, the linked chunk may still receive more events.
             if let Some(Gap { prev_token }) = self.room_linked_chunk.chunks().next().and_then(
                 |chunk| as_variant!(chunk.content(), ChunkContent::Gap(gap) => gap.clone()),
             ) {
-                LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(prev_token) }
+                trace!("chunk is fully loaded with a leading gap: reached_stat=true");
+                LoadMoreEventsBackwardsOutcome::Gap {
+                    prev_token: Some(prev_token),
+                    reached_on_disk_start: true,
+                }
             }
             // If there's at least one event, this means we've reached the start of the
             // timeline.
@@ -935,7 +951,10 @@ mod private {
             }
             // Otherwise, start back-pagination from the end of the room.
             else {
-                LoadMoreEventsBackwardsOutcome::Gap { prev_token: None }
+                LoadMoreEventsBackwardsOutcome::Gap {
+                    prev_token: None,
+                    reached_on_disk_start: true,
+                }
             }
         }
 
@@ -982,7 +1001,10 @@ mod private {
             };
 
             let chunk_content = new_first_chunk.content.clone();
-            let chunk_previous = new_first_chunk.previous.clone();
+
+            // We've reached the on-disk start, if and only if, there was no chunk prior to
+            // the one we just loaded.
+            let reached_on_disk_start = new_first_chunk.previous.is_none();
 
             if let Err(err) = self.room_linked_chunk.insert_new_chunk_as_first(new_first_chunk) {
                 error!("error when inserting the previous chunk into its linked chunk: {err}");
@@ -1005,20 +1027,23 @@ mod private {
                 ChunkContent::Gap(gap) => {
                     trace!("reloaded chunk from disk (gap)");
 
-                    LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(gap.prev_token) }
+                    LoadMoreEventsBackwardsOutcome::Gap {
+                        prev_token: Some(gap.prev_token),
+                        reached_on_disk_start,
+                    }
                 }
 
                 ChunkContent::Items(events) => {
-                    // We've reached the start on disk, if and only if, there was no chunk prior to
-                    // the one we just loaded.
-                    let reached_start = chunk_previous.is_none();
-
-                    trace!(?reached_start, "reloaded chunk from disk ({} items)", events.len());
+                    trace!(
+                        ?reached_on_disk_start,
+                        "loaded chunk from disk ({} items)",
+                        events.len()
+                    );
 
                     LoadMoreEventsBackwardsOutcome::Events {
                         events,
                         timeline_event_diffs,
-                        reached_start,
+                        reached_on_disk_start,
                     }
                 }
             })
@@ -1819,6 +1844,7 @@ mod private {
             Ok((has_new_gap, timeline_event_diffs))
         }
 
+        /*
         /// Handle the result of a single back-pagination request.
         ///
         /// If the `prev_token` is set, then this function will check that the
@@ -1912,6 +1938,7 @@ mod private {
 
             Ok(Some((BackPaginationOutcome { events, reached_start }, event_diffs)))
         }
+        */
 
         /// Subscribe to thread for a given root event, and get a (maybe empty)
         /// initially known list of events for that thread.
@@ -2514,7 +2541,7 @@ mod timed_tests {
 
         // Let's load more chunks to load all events.
         {
-            room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+            room_event_cache.pagination().run_backwards_once().await.unwrap();
 
             assert_let_timeout!(
                 Ok(RoomEventCacheUpdate::UpdateTimelineEvents { diffs, .. }) = stream.recv()
@@ -2667,7 +2694,7 @@ mod timed_tests {
         assert!(room_event_cache.find_event(event_id2).await.is_some());
 
         // Let's paginate to load more events.
-        room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+        room_event_cache.pagination().run_backwards_once().await.unwrap();
 
         assert_let_timeout!(
             Ok(RoomEventCacheUpdate::UpdateTimelineEvents { diffs, .. }) = stream.recv()
@@ -2963,7 +2990,7 @@ mod timed_tests {
         let mut generic_stream = event_cache.subscribe_to_room_generic_updates();
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
         assert_eq!(outcome.events.len(), 1);
         assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
         assert!(outcome.reached_start);
@@ -3015,7 +3042,7 @@ mod timed_tests {
 
         // But if we back-paginate, we don't need access to network to find out about
         // the previous event.
-        let outcome = room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
         assert_eq!(outcome.events.len(), 1);
         assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
         assert!(outcome.reached_start);
@@ -3099,7 +3126,7 @@ mod timed_tests {
         }
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
         assert!(outcome.reached_start);
 
         // All events are now loaded, so their order is precisely their enumerated index
@@ -3216,7 +3243,7 @@ mod timed_tests {
         assert!(stream1.is_empty());
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once(20).await.unwrap();
+        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
         assert_eq!(outcome.events.len(), 1);
         assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
         assert!(outcome.reached_start);
