@@ -95,8 +95,8 @@ impl RoomPagination {
         let mut events = Vec::with_capacity(num_requested_events.into());
 
         loop {
-            if let Some(outcome) = self.run_backwards_impl(num_requested_events).await? {
-                events.extend(outcome.events);
+            if let Some(mut outcome) = self.run_backwards_impl(num_requested_events).await? {
+                events.append(&mut outcome.events);
 
                 if outcome.reached_start || events.len() >= num_requested_events as usize {
                     return Ok(BackPaginationOutcome {
