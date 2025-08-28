@@ -584,7 +584,7 @@ impl RoomEventCacheInner {
 pub(super) enum LoadMoreEventsBackwardsOutcome {
     /// A gap has been inserted.
     Gap {
-        /// The previous batch token to be used as the "end" parameter in the
+        /// The previous batch token to be used as the `end` parameter in the
         /// back-pagination request.
         prev_token: Option<String>,
     },
