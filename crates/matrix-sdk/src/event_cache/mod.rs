@@ -1050,17 +1050,39 @@ impl EventCacheInner {
 
 /// The result of a single back-pagination request.
 #[derive(Debug)]
-pub struct BackPaginationOutcome {
-    /// Did the back-pagination reach the start of the timeline?
-    pub reached_start: bool,
+pub enum BackPaginationOutcome {
+    /// The pagination found a gap.
+    Gap {
+        /// Did the back-pagination reach the start of the timeline?
+        reached_start: bool,
 
-    /// All the events that have been returned in the back-pagination
-    /// request.
-    ///
-    /// Events are presented in reverse order: the first element of the vec,
-    /// if present, is the most "recent" event from the chunk (or
-    /// technically, the last one in the topological ordering).
-    pub events: Vec<TimelineEvent>,
+        /// The previous batch token to be used as the `end` parameter in the
+        /// back-pagination request.
+        prev_token: Option<String>,
+    },
+
+    /// The pagination found events.
+    Events {
+        /// Did the back-pagination reach the start of the timeline?
+        reached_start: bool,
+
+        /// All the events that have been returned in the back-pagination
+        /// request.
+        ///
+        /// Events are presented in reverse order: the first element of the vec,
+        /// if present, is the most "recent" event from the chunk (or
+        /// technically, the last one in the topological ordering).
+        events: Vec<TimelineEvent>,
+    },
+}
+
+impl BackPaginationOutcome {
+    fn reached_start(&self) -> bool {
+        match self {
+            Self::Gap { reached_start, .. } => *reached_start,
+            Self::Events { reached_start, .. } => *reached_start,
+        }
+    }
 }
 
 /// Represents a timeline update of a room. It hides the details of
@@ -1176,6 +1198,7 @@ mod tests {
     use std::{ops::Not, sync::Arc, time::Duration};
 
     use assert_matches::assert_matches;
+    use assert_matches2::assert_let;
     use futures_util::FutureExt as _;
     use matrix_sdk_base::{
         linked_chunk::{ChunkIdentifier, LinkedChunkId, Position, Update},
@@ -1190,8 +1213,9 @@ mod tests {
     use tokio::time::sleep;
 
     use super::{EventCacheError, RoomEventCacheGenericUpdate, RoomEventCacheUpdate};
-    use crate::test_utils::{
-        assert_event_matches_msg, client::MockClientBuilder, logged_in_client,
+    use crate::{
+        event_cache::BackPaginationOutcome,
+        test_utils::{assert_event_matches_msg, client::MockClientBuilder, logged_in_client},
     };
 
     #[async_test]
@@ -1487,10 +1511,13 @@ mod tests {
         let pagination = room_event_cache.pagination();
 
         // Paginate, it gets one new event in the timeline.
-        let pagination_outcome = pagination.run_backwards_once().await.unwrap();
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, events } =
+                pagination.run_backwards_once().await.unwrap()
+        );
 
-        assert_eq!(pagination_outcome.events.len(), 1);
-        assert!(pagination_outcome.reached_start.not());
+        assert_eq!(events.len(), 1);
+        assert!(reached_start.not());
         assert_matches!(
             generic_stream.recv().await,
             Ok(RoomEventCacheGenericUpdate { room_id: expected_room_id }) => {
@@ -1499,16 +1526,19 @@ mod tests {
         );
 
         // Paginate, it gets zero new event in the timeline.
-        let pagination_outcome = pagination.run_backwards_once().await.unwrap();
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, events } =
+                pagination.run_backwards_once().await.unwrap()
+        );
 
-        assert!(pagination_outcome.events.is_empty());
-        assert!(pagination_outcome.reached_start.not());
+        assert!(events.is_empty());
+        assert!(reached_start.not());
         assert!(generic_stream.recv().now_or_never().is_none());
 
         // Paginate once more. Just checking our scenario is correct.
         let pagination_outcome = pagination.run_backwards_once().await.unwrap();
 
-        assert!(pagination_outcome.reached_start);
+        assert!(pagination_outcome.reached_start());
         assert!(generic_stream.recv().now_or_never().is_none());
     }
 

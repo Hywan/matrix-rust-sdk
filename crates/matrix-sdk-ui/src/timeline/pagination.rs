@@ -16,7 +16,7 @@ use async_rx::StreamExt as _;
 use async_stream::stream;
 use futures_core::Stream;
 use futures_util::{StreamExt as _, pin_mut};
-use matrix_sdk::event_cache::{self, EventCacheError, RoomPaginationStatus};
+use matrix_sdk::event_cache::{self, BackPaginationOutcome, EventCacheError, RoomPaginationStatus};
 use tracing::{instrument, warn};
 
 use super::Error;
@@ -72,12 +72,24 @@ impl super::Timeline {
                 Ok(outcome) => {
                     // As an exceptional contract, restart the back-pagination if we received an
                     // empty chunk.
-                    if outcome.reached_start || !outcome.events.is_empty() {
-                        if outcome.reached_start {
-                            self.controller.insert_timeline_start_if_missing().await;
+                    match outcome {
+                        BackPaginationOutcome::Events { reached_start, events } => {
+                            if reached_start || !events.is_empty() {
+                                if reached_start {
+                                    self.controller.insert_timeline_start_if_missing().await;
+                                }
+
+                                return Ok(reached_start);
+                            }
                         }
 
-                        return Ok(outcome.reached_start);
+                        BackPaginationOutcome::Gap { reached_start, .. } => {
+                            if reached_start {
+                                self.controller.insert_timeline_start_if_missing().await;
+
+                                return Ok(reached_start);
+                            }
+                        }
                     }
                 }
 

@@ -88,21 +88,35 @@ impl RoomPagination {
     /// - or we've obtained enough events to fulfill the requested number of
     ///   events.
     #[instrument(skip(self))]
+    #[doc(hidden)] // Only for tests. TODO: rewrite the tests to not use this method
     pub async fn run_backwards_until(
         &self,
         num_requested_events: u16,
     ) -> Result<BackPaginationOutcome> {
-        let mut events = Vec::with_capacity(num_requested_events.into());
+        let mut all_events = Vec::with_capacity(num_requested_events.into());
 
         loop {
-            if let Some(mut outcome) = self.run_backwards_impl().await? {
-                events.append(&mut outcome.events);
+            if let Some(outcome) = self.run_backwards_impl().await? {
+                match outcome {
+                    BackPaginationOutcome::Events { reached_start, mut events } => {
+                        all_events.append(&mut events);
 
-                if outcome.reached_start || events.len() >= num_requested_events as usize {
-                    return Ok(BackPaginationOutcome {
-                        reached_start: outcome.reached_start,
-                        events,
-                    });
+                        if reached_start || events.len() >= num_requested_events as usize {
+                            return Ok(BackPaginationOutcome::Events {
+                                reached_start,
+                                events: all_events,
+                            });
+                        }
+                    }
+
+                    BackPaginationOutcome::Gap { reached_start, .. } => {
+                        if reached_start {
+                            return Ok(BackPaginationOutcome::Events {
+                                reached_start,
+                                events: all_events,
+                            });
+                        }
+                    }
                 }
 
                 trace!(
@@ -152,8 +166,9 @@ impl RoomPagination {
                 reset_status_on_drop_guard.disarm();
 
                 // Notify subscribers that pagination ended.
-                status_observable
-                    .set(RoomPaginationStatus::Idle { hit_timeline_start: outcome.reached_start });
+                status_observable.set(RoomPaginationStatus::Idle {
+                    hit_timeline_start: outcome.reached_start(),
+                });
 
                 Ok(Some(outcome))
             }
@@ -212,15 +227,18 @@ impl RoomPagination {
                     prev_token,
                 } => {
                     let _ = self.inner.sender.send(RoomEventCacheUpdate::PrependTimelineGap {
-                        prev_token,
+                        prev_token: prev_token.clone(),
                         origin: EventsOrigin::Cache,
                     });
 
-                    return Ok(Some(BackPaginationOutcome { reached_start, events: vec![] }));
+                    return Ok(Some(BackPaginationOutcome::Gap { reached_start, prev_token }));
                 }
 
                 LoadMoreEventsBackwardsOutcome::StartOfTimeline => {
-                    return Ok(Some(BackPaginationOutcome { reached_start: true, events: vec![] }));
+                    return Ok(Some(BackPaginationOutcome::Events {
+                        reached_start: true,
+                        events: vec![],
+                    }));
                 }
 
                 LoadMoreEventsBackwardsOutcome::Events {
@@ -242,7 +260,7 @@ impl RoomPagination {
                             });
                     }
 
-                    return Ok(Some(BackPaginationOutcome {
+                    return Ok(Some(BackPaginationOutcome::Events {
                         reached_start,
                         // This is a backwards pagination. `BackPaginationOutcome` expects events to
                         // be in “reverse order”.

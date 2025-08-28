@@ -284,7 +284,7 @@ impl RoomEventCache {
                         result.next_batch_token,
                         result.chunk,
                     ) {
-                        return Ok(outcome.reached_start);
+                        return Ok(outcome.reached_start());
                     }
 
                     // fallthrough: restart the pagination.
@@ -2271,7 +2271,9 @@ mod timed_tests {
     use super::RoomEventCacheGenericUpdate;
     use crate::{
         assert_let_timeout,
-        event_cache::{room::LoadMoreEventsBackwardsOutcome, RoomEventCacheUpdate},
+        event_cache::{
+            room::LoadMoreEventsBackwardsOutcome, BackPaginationOutcome, RoomEventCacheUpdate,
+        },
         test_utils::client::MockClientBuilder,
     };
 
@@ -2990,10 +2992,13 @@ mod timed_tests {
         let mut generic_stream = event_cache.subscribe_to_room_generic_updates();
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
-        assert_eq!(outcome.events.len(), 1);
-        assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
-        assert!(outcome.reached_start);
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, events } =
+                room_event_cache.pagination().run_backwards_once().await.unwrap()
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id().as_deref(), Some(evid1));
+        assert!(reached_start);
 
         // We also get an update about the loading from the store.
         assert_let_timeout!(
@@ -3042,10 +3047,13 @@ mod timed_tests {
 
         // But if we back-paginate, we don't need access to network to find out about
         // the previous event.
-        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
-        assert_eq!(outcome.events.len(), 1);
-        assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
-        assert!(outcome.reached_start);
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, events } =
+                room_event_cache.pagination().run_backwards_once().await.unwrap()
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id().as_deref(), Some(evid1));
+        assert!(reached_start);
     }
 
     #[async_test]
@@ -3126,8 +3134,11 @@ mod timed_tests {
         }
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
-        assert!(outcome.reached_start);
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, .. } =
+                room_event_cache.pagination().run_backwards_once().await.unwrap()
+        );
+        assert!(reached_start);
 
         // All events are now loaded, so their order is precisely their enumerated index
         // in a linear iteration.
@@ -3243,10 +3254,13 @@ mod timed_tests {
         assert!(stream1.is_empty());
 
         // Force loading the full linked chunk by back-paginating.
-        let outcome = room_event_cache.pagination().run_backwards_once().await.unwrap();
-        assert_eq!(outcome.events.len(), 1);
-        assert_eq!(outcome.events[0].event_id().as_deref(), Some(evid1));
-        assert!(outcome.reached_start);
+        assert_let!(
+            BackPaginationOutcome::Events { reached_start, events } =
+                room_event_cache.pagination().run_backwards_once().await.unwrap()
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id().as_deref(), Some(evid1));
+        assert!(reached_start);
 
         // We also get an update about the loading from the store. Ignore it, for this
         // test's sake.

@@ -300,7 +300,7 @@ impl ThreadEventCache {
                 .send(ThreadEventCacheUpdate { diffs: updates, origin: EventsOrigin::Pagination });
         }
 
-        Some(BackPaginationOutcome { reached_start, events })
+        Some(BackPaginationOutcome::Events { reached_start, events })
     }
 
     /// Returns the latest event ID in this thread, if any.
