@@ -15,7 +15,7 @@
 use std::{fmt, sync::Arc};
 
 use indexmap::IndexMap;
-use matrix_sdk::deserialized_responses::EncryptionInfo;
+use matrix_sdk::{deserialized_responses::EncryptionInfo, event_cache::EventsOrigin};
 use ruma::{
     OwnedEventId, OwnedTransactionId, OwnedUserId,
     events::{AnySyncTimelineEvent, receipt::Receipt},
@@ -85,6 +85,16 @@ pub(in crate::timeline) enum RemoteEventOrigin {
     Pagination,
     /// We don't know.
     Unknown,
+}
+
+impl From<EventsOrigin> for RemoteEventOrigin {
+    fn from(value: EventsOrigin) -> Self {
+        match value {
+            EventsOrigin::Sync => Self::Sync,
+            EventsOrigin::Pagination => Self::Pagination,
+            EventsOrigin::Cache => Self::Cache,
+        }
+    }
 }
 
 #[cfg(not(tarpaulin_include))]

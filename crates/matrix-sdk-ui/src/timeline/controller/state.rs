@@ -89,6 +89,18 @@ impl<P: RoomDataProvider> TimelineState<P> {
         transaction.commit();
     }
 
+    pub(super) async fn prepend_remote_gap(
+        &mut self,
+        prev_token: Option<String>,
+        origin: RemoteEventOrigin,
+        room_data: &P,
+        settings: &TimelineSettings,
+    ) {
+        let mut transaction = self.transaction();
+        transaction.prepend_remote_gap(prev_token, origin, room_data, settings).await;
+        transaction.commit();
+    }
+
     /// Handle remote aggregations on events as [`VectorDiff`]s.
     pub(super) async fn handle_remote_aggregations(
         &mut self,

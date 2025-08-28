@@ -37,7 +37,8 @@ use super::{
     metadata::EventMeta,
 };
 use crate::timeline::{
-    EmbeddedEvent, ThreadSummary, TimelineDetails, VirtualTimelineItem,
+    EmbeddedEvent, ThreadSummary, TimelineDetails, TimelineItem, TimelineItemKind,
+    VirtualTimelineItem,
     controller::TimelineFocusKind,
     event_handler::{FailedToParseEvent, RemovedItem, TimelineAction},
 };
@@ -175,6 +176,25 @@ impl<'a, P: RoomDataProvider> TimelineStateTransaction<'a, P> {
                 v => unimplemented!("{v:?}"),
             }
         }
+
+        self.adjust_date_dividers(date_divider_adjuster);
+        self.check_invariants();
+    }
+
+    pub(super) async fn prepend_remote_gap(
+        &mut self,
+        prev_token: Option<String>,
+        _origin: RemoteEventOrigin,
+        _room_data_provider: &P,
+        settings: &TimelineSettings,
+    ) {
+        let date_divider_adjuster = DateDividerAdjuster::new(settings.date_divider_mode.clone());
+
+        self.items.prepend_gap(
+            self.meta.new_timeline_item(TimelineItemKind::Virtual(VirtualTimelineItem::Gap {
+                prev_token,
+            })),
+        );
 
         self.adjust_date_dividers(date_divider_adjuster);
         self.check_invariants();

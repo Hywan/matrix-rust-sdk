@@ -172,12 +172,7 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
 
             RoomEventCacheUpdate::UpdateTimelineEvents { diffs, origin } => {
                 trace!("Received new timeline events diffs");
-                let origin = match origin {
-                    EventsOrigin::Sync => RemoteEventOrigin::Sync,
-                    EventsOrigin::Pagination => RemoteEventOrigin::Pagination,
-                    EventsOrigin::Cache => RemoteEventOrigin::Cache,
-                };
-
+                let origin = origin.into();
                 let has_diffs = !diffs.is_empty();
 
                 if matches!(timeline_focus, TimelineFocus::Live { .. }) {
@@ -192,8 +187,13 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
                 }
             }
 
-            RoomEventCacheUpdate::PrependTimelineGap { .. } => {
-                todo!()
+            RoomEventCacheUpdate::PrependTimelineGap { prev_token, origin } => {
+                trace!("Received a new timeline gap");
+                let origin = origin.into();
+
+                if matches!(timeline_focus, TimelineFocus::Live { .. }) {
+                    timeline_controller.prepend_remote_gap(prev_token, origin).await;
+                }
             }
 
             RoomEventCacheUpdate::AddEphemeralEvents { events } => {

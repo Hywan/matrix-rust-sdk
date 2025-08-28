@@ -35,6 +35,6 @@ pub enum VirtualTimelineItem {
     Gap {
         /// The previous batch token to be used as the `end` parameter in the
         /// back-pagination request.
-        prev_token: String,
+        prev_token: Option<String>,
     },
 }

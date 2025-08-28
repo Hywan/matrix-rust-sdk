@@ -423,6 +423,28 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
         self.push_front(timeline_item, None);
     }
 
+    /// Prepend a new [`Gap`] virtual timeline item.
+    ///
+    /// # Invariant
+    ///
+    /// A [`Gap`] is inserted at the first position if no [`TimelineStart`] is
+    /// present, otherwise it is inserted at the second position.
+    ///
+    /// # Panics
+    ///
+    /// It panics if the provided `timeline_item` is not a [`Gap`].
+    ///
+    /// [`Gap`]: super::VirtualTimelineItem::Gap
+    /// [`TimelineStart`]: super::VirtualTimelineItem::TimelineStart
+    pub fn prepend_gap(&mut self, timeline_item: Arc<TimelineItem>) {
+        assert!(timeline_item.is_gap(), "The provided `timeline_item` is not a `Gap`");
+
+        let timeline_item_index =
+            if self.get(0).is_some_and(|item| item.is_timeline_start()) { 1 } else { 0 };
+
+        self.insert(timeline_item_index, timeline_item, None);
+    }
+
     /// Clear all timeline items and all remote events.
     pub fn clear(&mut self) {
         self.items.clear();
