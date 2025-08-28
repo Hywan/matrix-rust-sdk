@@ -52,7 +52,7 @@ use super::{
 use crate::{
     client::WeakClient,
     event_cache::EventCacheError,
-    room::{IncludeRelations, RelationsOptions, WeakRoom},
+    room::{IncludeRelations, MessagesOptions, RelationsOptions, WeakRoom},
 };
 
 pub(super) mod events;
@@ -312,6 +312,66 @@ impl RoomEventCache {
     /// back-pagination queries in the current room.
     pub fn pagination(&self) -> RoomPagination {
         RoomPagination { inner: self.inner.clone() }
+    }
+
+    /// Run a single pagination request (/messages) to the server.
+    ///
+    /// If there are no previous-batch tokens, it will wait for one for a short
+    /// while to get one, or if it's already done so or if it's seen a
+    /// previous-batch token before, it will immediately indicate it's
+    /// reached the end of the timeline.
+    pub async fn resolve_gap(
+        &self,
+        prev_token: Option<String>,
+        batch_size: u16,
+    ) -> Result<Option<GapResolutionOutcome>> {
+        let (events, new_token) = {
+            let Some(room) = self.inner.weak_room.get() else {
+                // The client is shutting down, return an empty default
+                // response.
+                return Ok(None);
+                /*
+                return Ok(Some(BackPaginationOutcome {
+                    reached_start: false,
+                    events: Default::default(),
+                }));
+                */
+            };
+
+            let mut options = MessagesOptions::new(Direction::Backward).from(prev_token.as_deref());
+            options.limit = batch_size.into();
+
+            let response = room
+                .messages(options)
+                .await
+                .map_err(|err| EventCacheError::GapResolutionError(Box::new(err)))?;
+
+            (response.chunk, response.end)
+        };
+
+        if let Some((outcome, timeline_event_diffs)) = self
+            .inner
+            .state
+            .write()
+            .await
+            .handle_gap_resolution(events, new_token, prev_token.clone())
+            .await?
+        {
+            let _ = self.inner.sender.send(RoomEventCacheUpdate::RemoveTimelineGap { prev_token });
+
+            if !timeline_event_diffs.is_empty() {
+                let _ = self.inner.sender.send(RoomEventCacheUpdate::UpdateTimelineEvents {
+                    diffs: timeline_event_diffs,
+                    origin: EventsOrigin::Pagination,
+                });
+            }
+
+            Ok(Some(outcome))
+        } else {
+            // The previous token has gone missing, so the timeline has been reset in the
+            // meanwhile, but it's fine per this function's contract.
+            Ok(None)
+        }
     }
 
     /// Try to find a single event in this room, starting from the most recent
@@ -1844,16 +1904,15 @@ mod private {
             Ok((has_new_gap, timeline_event_diffs))
         }
 
-        /*
-        /// Handle the result of a single back-pagination request.
+        /// Handle the result of a `/messages` request.
         ///
         /// If the `prev_token` is set, then this function will check that the
         /// corresponding gap is present in the in-memory linked chunk.
         /// If it's not the case, `Ok(None)` will be returned, and the
         /// caller may decide to do something based on that (e.g. restart a
-        /// pagination).
+        /// resolution).
         #[must_use = "Propagate `VectorDiff` updates via `RoomEventCacheUpdate`"]
-        pub async fn handle_backpagination(
+        pub async fn handle_gap_resolution(
             &mut self,
             events: Vec<Event>,
             mut new_token: Option<String>,
@@ -1865,7 +1924,7 @@ mod private {
             let prev_gap_id = if let Some(token) = prev_token {
                 // Find the corresponding gap in the in-memory linked chunk.
                 let gap_chunk_id = self.room_linked_chunk.chunk_identifier(|chunk| {
-                    matches!(chunk.content(), ChunkContent::Gap(Gap { ref prev_token }) if *prev_token == token)
+                    matches!(chunk.content(), ChunkContent::Gap(Gap { prev_token }) if prev_token == &token)
                 });
 
                 if gap_chunk_id.is_none() {
@@ -1938,7 +1997,6 @@ mod private {
 
             Ok(Some((BackPaginationOutcome { events, reached_start }, event_diffs)))
         }
-        */
 
         /// Subscribe to thread for a given root event, and get a (maybe empty)
         /// initially known list of events for that thread.

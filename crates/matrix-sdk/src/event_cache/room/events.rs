@@ -302,7 +302,7 @@ impl EventLinkedChunk {
         self.chunks.push_items_back(events.to_vec());
     }
 
-    /// Finish a network back-pagination for this linked chunk by updating the
+    /// Finish a network gap resolution for this linked chunk by updating the
     /// in-memory linked chunk with the results.
     ///
     /// ## Arguments
@@ -317,7 +317,7 @@ impl EventLinkedChunk {
     ///
     /// Returns a boolean indicating whether we've hit the start of the
     /// timeline/linked chunk.
-    pub fn finish_back_pagination(
+    pub fn finish_gap_resolution(
         &mut self,
         prev_gap_id: Option<ChunkIdentifier>,
         new_gap: Option<Gap>,

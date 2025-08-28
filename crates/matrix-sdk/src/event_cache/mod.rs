@@ -105,6 +105,10 @@ pub enum EventCacheError {
     #[error("We were already back-paginating.")]
     AlreadyBackpaginating,
 
+    /// An error has been observed while resolving a gap.
+    #[error(transparent)]
+    GapResolutionError(Box<crate::Error>),
+
     /// An error happening when interacting with storage.
     #[error(transparent)]
     Storage(#[from] EventCacheStoreError),
