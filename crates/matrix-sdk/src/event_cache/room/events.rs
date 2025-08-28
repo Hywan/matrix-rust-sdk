@@ -273,8 +273,8 @@ impl EventLinkedChunk {
 
     /// Return the latest gap, if any.
     ///
-    /// Latest means "closest to the end", or, since events are ordered
-    /// according to the sync ordering, this means "the most recent one".
+    /// Latest means “closest to the end”, or, since events are ordered
+    /// according to the sync ordering, this means “the most recent one”.
     pub fn rgap(&self) -> Option<Gap> {
         self.rchunks()
             .find_map(|chunk| as_variant!(chunk.content(), ChunkContent::Gap(gap) => gap.clone()))

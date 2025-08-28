@@ -606,6 +606,7 @@ mod private {
         sync::{atomic::AtomicUsize, Arc},
     };
 
+    use as_variant::as_variant;
     use eyeball::SharedObservable;
     use eyeball_im::VectorDiff;
     use matrix_sdk_base::{
@@ -907,39 +908,41 @@ mod private {
             Ok(Some(all_chunks))
         }
 
-        /// Given a fully-loaded linked chunk with no gaps, return the
+        /// Given a fully-loaded linked chunk, return the
         /// [`LoadMoreEventsBackwardsOutcome`] expected for this room's cache.
         fn conclude_load_more_for_fully_loaded_chunk(&mut self) -> LoadMoreEventsBackwardsOutcome {
-            // If we never received events for this room, this means we've never
-            // received a sync for that room, because every room must have at least a
-            // room creation event. Otherwise, we have reached the start of the
+            // Remember: the linked chunk is fully loaded from the storage point of view.
+            //
+            // Note: if we never received events for this room, this means we've never
+            // received a sync for that room, because every room must have at least a room
+            // creation event.
+
+            // If the first chunk is a gap, the linked chunk can still receive more events.
+            if let Some(Gap { prev_token }) = self.room_linked_chunk.chunks().next().and_then(
+                |chunk| as_variant!(chunk.content(), ChunkContent::Gap(gap) => gap.clone()),
+            ) {
+                LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(prev_token) }
+            }
+            // If there's at least one event, this means we've reached the start of the
             // timeline.
-            if self.room_linked_chunk.events().next().is_some() {
-                // If there's at least one event, this means we've reached the start of the
-                // timeline, since the chunk is fully loaded.
+            else if self.room_linked_chunk.events().next().is_some() {
                 trace!("chunk is fully loaded and non-empty: reached_start=true");
                 LoadMoreEventsBackwardsOutcome::StartOfTimeline
-            } else if !self.waited_for_initial_prev_token {
-                // There's no events. Since we haven't yet, wait for an initial previous-token.
+            }
+            // There's no events. Since we haven't yet, wait for an initial previous-token.
+            else if !self.waited_for_initial_prev_token {
                 LoadMoreEventsBackwardsOutcome::WaitForInitialPrevToken
-            } else {
-                // Otherwise, we've already waited, *and* received no previous-batch token from
-                // the sync, *and* there are still no events in the fully-loaded
-                // chunk: start back-pagination from the end of the room.
+            }
+            // Otherwise, start back-pagination from the end of the room.
+            else {
                 LoadMoreEventsBackwardsOutcome::Gap { prev_token: None }
             }
         }
 
-        /// Load more events backwards if the last chunk is **not** a gap.
+        /// Load more events backwards.
         pub(in super::super) async fn load_more_events_backwards(
             &mut self,
         ) -> Result<LoadMoreEventsBackwardsOutcome, EventCacheError> {
-            // If any in-memory chunk is a gap, don't load more events, and let the caller
-            // resolve the gap.
-            if let Some(prev_token) = self.room_linked_chunk.rgap().map(|gap| gap.prev_token) {
-                return Ok(LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(prev_token) });
-            }
-
             // Because `first_chunk` is `not `Send`, get this information before the
             // `.await` point, so that this `Future` can implement `Send`.
             let first_chunk_identifier = self
@@ -951,7 +954,7 @@ mod private {
 
             let store = self.store.lock().await?;
 
-            // The first chunk is not a gap, we can load its previous chunk.
+            // We can load the first chunk's previous chunk.
             let linked_chunk_id = LinkedChunkId::Room(&self.room);
             let new_first_chunk = match store
                 .load_previous_chunk(linked_chunk_id, first_chunk_identifier)
@@ -979,13 +982,7 @@ mod private {
             };
 
             let chunk_content = new_first_chunk.content.clone();
-
-            // We've reached the start on disk, if and only if, there was no chunk prior to
-            // the one we just loaded.
-            //
-            // This value is correct, if and only if, it is used for a chunk content of kind
-            // `Items`.
-            let reached_start = new_first_chunk.previous.is_none();
+            let chunk_previous = new_first_chunk.previous.clone();
 
             if let Err(err) = self.room_linked_chunk.insert_new_chunk_as_first(new_first_chunk) {
                 error!("error when inserting the previous chunk into its linked chunk: {err}");
@@ -1007,11 +1004,17 @@ mod private {
             Ok(match chunk_content {
                 ChunkContent::Gap(gap) => {
                     trace!("reloaded chunk from disk (gap)");
+
                     LoadMoreEventsBackwardsOutcome::Gap { prev_token: Some(gap.prev_token) }
                 }
 
                 ChunkContent::Items(events) => {
+                    // We've reached the start on disk, if and only if, there was no chunk prior to
+                    // the one we just loaded.
+                    let reached_start = chunk_previous.is_none();
+
                     trace!(?reached_start, "reloaded chunk from disk ({} items)", events.len());
+
                     LoadMoreEventsBackwardsOutcome::Events {
                         events,
                         timeline_event_diffs,
