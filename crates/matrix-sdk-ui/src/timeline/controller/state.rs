@@ -101,14 +101,15 @@ impl<P: RoomDataProvider> TimelineState<P> {
         transaction.commit();
     }
 
-    pub(super) async fn remove_remote_gap(
+    pub(super) async fn resolve_remote_gap(
         &mut self,
         prev_token: Option<String>,
+        new_prev_token: Option<String>,
         room_data: &P,
         settings: &TimelineSettings,
     ) {
         let mut transaction = self.transaction();
-        transaction.remove_remote_gap(prev_token, room_data, settings).await;
+        transaction.resolve_remote_gap(prev_token, new_prev_token, room_data, settings).await;
         transaction.commit();
     }
 

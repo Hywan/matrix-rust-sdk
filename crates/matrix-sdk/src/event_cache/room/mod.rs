@@ -29,7 +29,7 @@ use eyeball::SharedObservable;
 use eyeball_im::VectorDiff;
 use matrix_sdk_base::{
     deserialized_responses::AmbiguityChange,
-    event_cache::Event,
+    event_cache::{Event, Gap},
     linked_chunk::Position,
     sync::{JoinedRoomUpdate, LeftRoomUpdate, Timeline},
 };
@@ -46,12 +46,11 @@ use tokio::sync::{
 use tracing::{instrument, trace, warn};
 
 use super::{
-    AutoShrinkChannelPayload, EventsOrigin, Result, RoomEventCacheGenericUpdate,
+    AutoShrinkChannelPayload, EventCacheError, EventsOrigin, Result, RoomEventCacheGenericUpdate,
     RoomEventCacheUpdate, RoomPagination, RoomPaginationStatus,
 };
 use crate::{
     client::WeakClient,
-    event_cache::EventCacheError,
     room::{IncludeRelations, MessagesOptions, RelationsOptions, WeakRoom},
 };
 
@@ -329,13 +328,11 @@ impl RoomEventCache {
             let Some(room) = self.inner.weak_room.get() else {
                 // The client is shutting down, return an empty default
                 // response.
-                return Ok(None);
-                /*
-                return Ok(Some(BackPaginationOutcome {
-                    reached_start: false,
-                    events: Default::default(),
+                return Ok(Some(GapResolutionOutcome {
+                    events: vec![],
+                    gap_removed: false,
+                    new_inserted_gap: None,
                 }));
-                */
             };
 
             let mut options = MessagesOptions::new(Direction::Backward).from(prev_token.as_deref());
@@ -354,10 +351,15 @@ impl RoomEventCache {
             .state
             .write()
             .await
-            .handle_gap_resolution(events, new_token, prev_token.clone())
+            .handle_gap_resolution(events, new_token.clone(), prev_token.clone())
             .await?
         {
-            let _ = self.inner.sender.send(RoomEventCacheUpdate::RemoveTimelineGap { prev_token });
+            if outcome.gap_removed {
+                let _ = self.inner.sender.send(RoomEventCacheUpdate::ResolvedTimelineGap {
+                    prev_token,
+                    new_prev_token: new_token,
+                });
+            }
 
             if !timeline_event_diffs.is_empty() {
                 let _ = self.inner.sender.send(RoomEventCacheUpdate::UpdateTimelineEvents {
@@ -671,6 +673,13 @@ pub(super) enum LoadMoreEventsBackwardsOutcome {
     WaitForInitialPrevToken,
 }
 
+#[derive(Debug)]
+pub struct GapResolutionOutcome {
+    pub events: Vec<Event>,
+    pub gap_removed: bool,
+    pub new_inserted_gap: Option<Gap>,
+}
+
 // Use a private module to hide `events` to this parent module.
 mod private {
     use std::{
@@ -710,14 +719,15 @@ mod private {
     use tracing::{debug, error, instrument, trace, warn};
 
     use super::{
-        super::{deduplicator::DeduplicationOutcome, EventCacheError},
+        super::{
+            deduplicator::{filter_duplicate_events, DeduplicationOutcome},
+            room::threads::ThreadEventCache,
+            BackPaginationOutcome, EventCacheError, RoomEventCacheLinkedChunkUpdate,
+            RoomPaginationStatus, ThreadEventCacheUpdate,
+        },
         events::EventLinkedChunk,
-        sort_positions_descending, EventLocation, LoadMoreEventsBackwardsOutcome,
-    };
-    use crate::event_cache::{
-        deduplicator::filter_duplicate_events, room::threads::ThreadEventCache,
-        BackPaginationOutcome, RoomEventCacheLinkedChunkUpdate, RoomPaginationStatus,
-        ThreadEventCacheUpdate,
+        sort_positions_descending, EventLocation, GapResolutionOutcome,
+        LoadMoreEventsBackwardsOutcome,
     };
 
     /// State for a single room's event cache.
@@ -1547,7 +1557,7 @@ mod private {
             // Update the store before doing the post-processing.
             self.propagate_changes().await?;
 
-            let mut new_events_by_thread: BTreeMap<_, Vec<_>> = BTreeMap::new();
+            let mut new_events_by_thread = BTreeMap::<_, Vec<_>>::new();
 
             for event in events {
                 self.maybe_apply_new_redaction(&event).await?;
@@ -1917,7 +1927,7 @@ mod private {
             events: Vec<Event>,
             mut new_token: Option<String>,
             prev_token: Option<String>,
-        ) -> Result<Option<(BackPaginationOutcome, Vec<VectorDiff<Event>>)>, EventCacheError>
+        ) -> Result<Option<(GapResolutionOutcome, Vec<VectorDiff<Event>>)>, EventCacheError>
         {
             // Check that the previous token still exists; otherwise it's a sign that the
             // room's timeline has been cleared.
@@ -1983,10 +1993,13 @@ mod private {
             // the inverted order; reorder them.
             let topo_ordered_events = events.iter().rev().cloned().collect::<Vec<_>>();
 
+            // We want to create a new gap only when at least one new, non-duplicated event,
+            // has been added to the chunk. Otherwise it means we've
+            // back-paginated all the known events.
             let new_gap = new_token.map(|prev_token| Gap { prev_token });
-            let reached_start = self.room_linked_chunk.finish_back_pagination(
+            let prev_gap_removed = self.room_linked_chunk.finish_gap_resolution(
                 prev_gap_id,
-                new_gap,
+                new_gap.clone(),
                 &topo_ordered_events,
             );
 
@@ -1995,7 +2008,14 @@ mod private {
 
             let event_diffs = self.room_linked_chunk.updates_as_vector_diffs();
 
-            Ok(Some((BackPaginationOutcome { events, reached_start }, event_diffs)))
+            Ok(Some((
+                GapResolutionOutcome {
+                    events,
+                    gap_removed: prev_gap_removed,
+                    new_inserted_gap: new_gap,
+                },
+                event_diffs,
+            )))
         }
 
         /// Subscribe to thread for a given root event, and get a (maybe empty)

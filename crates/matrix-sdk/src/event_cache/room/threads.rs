@@ -287,7 +287,7 @@ impl ThreadEventCache {
         };
 
         // Add the paginated events to the thread chunk.
-        let reached_start = self.chunk.finish_back_pagination(prev_gap_id, new_gap, &events);
+        let reached_start = self.chunk.finish_gap_resolution(prev_gap_id, new_gap, &events);
 
         self.propagate_changes();
 

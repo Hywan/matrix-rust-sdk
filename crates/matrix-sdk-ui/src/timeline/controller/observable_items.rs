@@ -443,13 +443,18 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
         self.insert(self.first_remotes_region_index(), timeline_item, None);
     }
 
-    /// Remove a [`Gap`] virtual timeline item identified by its `prev_token`.
+    /// Resolve a [`Gap`] virtual timeline item identified by its `prev_token`.
+    ///
+    /// If `new_prev_token` is `Some(_)`, it means the gap has been partially
+    /// resolved (more events must be fetched). In this case, the [`Gap`] isn't
+    /// removed, it is updated to contain the `new_prev_token`. Otherwise, the
+    /// [`Gap`] is removed.
     ///
     /// [`Gap`]: super::VirtualTimelineItem::Gap
-    pub fn remove_gap(&mut self, prev_token: Option<String>) {
+    pub fn resolve_gap(&mut self, prev_token: Option<String>, new_prev_token: Option<String>) {
         // The gap is more likely to be at the start of the timeline. Let's traverse
         // items forwards.
-        let Some((timeline_item_index, _)) =
+        let Some((timeline_item_index, timeline_item)) =
             self.iter_remotes_region().find(|(_, timeline_item)| {
                 matches!(
                     timeline_item.kind(),
@@ -462,7 +467,19 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
             return;
         };
 
-        self.remove(timeline_item_index);
+        if let Some(new_prev_token) = new_prev_token {
+            self.replace(
+                timeline_item_index,
+                TimelineItem::new(
+                    TimelineItemKind::Virtual(VirtualTimelineItem::Gap {
+                        prev_token: Some(new_prev_token),
+                    }),
+                    timeline_item.internal_id.clone(),
+                ),
+            );
+        } else {
+            self.remove(timeline_item_index);
+        }
     }
 
     /// Clear all timeline items and all remote events.
