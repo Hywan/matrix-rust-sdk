@@ -999,15 +999,12 @@ mod private {
             // received a sync for that room, because every room must have at least a room
             // creation event.
 
-            // If the first chunk is a gap, the linked chunk may still receive more events.
-            if let Some(Gap { prev_token }) = self.room_linked_chunk.chunks().next().and_then(
-                |chunk| as_variant!(chunk.content(), ChunkContent::Gap(gap) => gap.clone()),
-            ) {
+            // If the first chunk is a gap, and it's fully loaded, we consider the start of
+            // the timeline has been reached. The gap must be resolved: the linked chunk may
+            // still receive more events.
+            if self.room_linked_chunk.chunks().next().map(|chunk| chunk.is_gap()).unwrap_or(false) {
                 trace!("chunk is fully loaded with a leading gap: reached_stat=true");
-                LoadMoreEventsBackwardsOutcome::Gap {
-                    prev_token: Some(prev_token),
-                    reached_on_disk_start: true,
-                }
+                LoadMoreEventsBackwardsOutcome::StartOfTimeline
             }
             // If there's at least one event, this means we've reached the start of the
             // timeline.
