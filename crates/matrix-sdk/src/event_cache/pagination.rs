@@ -131,6 +131,8 @@ impl RoomPagination {
     /// sync, if we haven't done that before.
     #[instrument(skip(self))]
     pub async fn run_backwards_once(&self) -> Result<BackPaginationOutcome> {
+        eprintln!("=========== RUN BACKWARDS ONCE");
+
         loop {
             if let Some(outcome) = self.run_backwards_impl().await? {
                 return Ok(outcome);
@@ -187,6 +189,8 @@ impl RoomPagination {
         // resolved manually.
 
         loop {
+            eprintln!("=== PAGINATE BACKWARDS IMPL ITERATION");
+
             let mut state_guard = self.inner.state.write().await;
 
             match state_guard.load_more_events_backwards().await? {
@@ -227,10 +231,14 @@ impl RoomPagination {
                         origin: EventsOrigin::Cache,
                     });
 
+                    eprintln!("load more events backwards outcome => gap");
+
                     return Ok(Some(BackPaginationOutcome::Gap { reached_start, prev_token }));
                 }
 
                 LoadMoreEventsBackwardsOutcome::StartOfTimeline => {
+                    eprintln!("load more events backwards outcome => start of timeline");
+
                     return Ok(Some(BackPaginationOutcome::Events {
                         reached_start: true,
                         events: vec![],
@@ -242,6 +250,8 @@ impl RoomPagination {
                     timeline_event_diffs,
                     reached_on_disk_start: reached_start,
                 } => {
+                    eprintln!("load more events backwards outcome => events");
+
                     if !timeline_event_diffs.is_empty() {
                         let _ =
                             self.inner.sender.send(RoomEventCacheUpdate::UpdateTimelineEvents {

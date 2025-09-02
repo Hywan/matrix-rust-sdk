@@ -317,7 +317,11 @@ impl EventLinkedChunk {
     /// ## Returns
     ///
     /// Returns `true` if the gap identified by `gap_id_to_resolve` has been
-    /// removed, `false` otherwise.
+    /// removed or doesn't exist, `false` otherwise.
+    ///
+    /// @TODO We MUST keep the semantics of whether we've reached the start or
+    /// not because of how `thread` uses this method. For the moment, it's
+    /// broken. Hackathon-style.
     #[instrument(skip(self, events))]
     pub fn finish_gap_resolution(
         &mut self,
@@ -348,7 +352,7 @@ impl EventLinkedChunk {
                 .insert_items_at(pos, events.to_vec())
                 .expect("pos is a valid position we just read above");
 
-            (false, Some(pos))
+            (true, Some(pos))
         } else {
             // No gap to resolve, and no prior events: push the events.
             trace!("pushing events back");
@@ -356,7 +360,7 @@ impl EventLinkedChunk {
             self.chunks.push_items_back(events.to_vec());
 
             // A new gap may be inserted before the new events, if there are any.
-            (false, self.events().next().map(|(item_pos, _)| item_pos))
+            (true, self.events().next().map(|(item_pos, _)| item_pos))
         };
 
         // And insert the new gap if needs be.

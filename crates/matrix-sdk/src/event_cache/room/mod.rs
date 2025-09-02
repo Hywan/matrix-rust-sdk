@@ -328,12 +328,15 @@ impl RoomEventCache {
             let Some(room) = self.inner.weak_room.get() else {
                 // The client is shutting down, return an empty default
                 // response.
+                eprintln!("[ec] resolve_gap: no room");
                 return Ok(Some(GapResolutionOutcome {
                     events: vec![],
                     gap_removed: false,
                     new_inserted_gap: None,
                 }));
             };
+
+            eprintln!("[ec] resolve_gap: calling `/messages`");
 
             let mut options = MessagesOptions::new(Direction::Backward).from(prev_token.as_deref());
             options.limit = batch_size.into();
@@ -342,6 +345,8 @@ impl RoomEventCache {
                 .messages(options)
                 .await
                 .map_err(|err| EventCacheError::GapResolutionError(Box::new(err)))?;
+
+            eprintln!("[ec] resolve_gap: got response from `/messages`");
 
             (response.chunk, response.end)
         };
@@ -354,6 +359,8 @@ impl RoomEventCache {
             .handle_gap_resolution(events, new_token.clone(), prev_token.clone())
             .await?
         {
+            dbg!(&outcome);
+
             if outcome.gap_removed {
                 let _ = self.inner.sender.send(RoomEventCacheUpdate::ResolvedTimelineGap {
                     prev_token,
@@ -370,6 +377,8 @@ impl RoomEventCache {
 
             Ok(Some(outcome))
         } else {
+            eprintln!("[ec] resolve_gap: gap is missing");
+
             // The previous token has gone missing, so the timeline has been reset in the
             // meanwhile, but it's fine per this function's contract.
             Ok(None)
@@ -687,7 +696,6 @@ mod private {
         sync::{atomic::AtomicUsize, Arc},
     };
 
-    use as_variant::as_variant;
     use eyeball::SharedObservable;
     use eyeball_im::VectorDiff;
     use matrix_sdk_base::{
@@ -1026,6 +1034,7 @@ mod private {
         }
 
         /// Load more events backwards.
+        #[instrument(skip_all)]
         pub(in super::super) async fn load_more_events_backwards(
             &mut self,
         ) -> Result<LoadMoreEventsBackwardsOutcome, EventCacheError> {
@@ -1047,11 +1056,13 @@ mod private {
                 .await
             {
                 Ok(Some(new_first_chunk)) => {
+                    eprintln!("loading OK");
                     // All good, let's continue with this chunk.
                     new_first_chunk
                 }
 
                 Ok(None) => {
+                    eprintln!("fully loaded");
                     // There's no previous chunk. The chunk is now fully-loaded. Conclude.
                     return Ok(self.conclude_load_more_for_fully_loaded_chunk());
                 }
@@ -1086,6 +1097,9 @@ mod private {
             // ⚠️ Let's not propagate the updates to the store! We already have these data
             // in the store! Let's drain them.
             let _ = self.room_linked_chunk.store_updates().take();
+
+            eprintln!("====> loaded correctly!");
+            dbg!(&self.room_linked_chunk.debug_string());
 
             // However, we want to get updates as `VectorDiff`s.
             let timeline_event_diffs = self.room_linked_chunk.updates_as_vector_diffs();
@@ -1994,7 +2008,7 @@ mod private {
             // has been added to the chunk. Otherwise it means we've
             // back-paginated all the known events.
             let new_gap = new_token.map(|prev_token| Gap { prev_token });
-            let prev_gap_removed = self.room_linked_chunk.finish_gap_resolution(
+            self.room_linked_chunk.finish_gap_resolution(
                 prev_gap_id,
                 new_gap.clone(),
                 &topo_ordered_events,
@@ -2006,11 +2020,7 @@ mod private {
             let event_diffs = self.room_linked_chunk.updates_as_vector_diffs();
 
             Ok(Some((
-                GapResolutionOutcome {
-                    events,
-                    gap_removed: prev_gap_removed,
-                    new_inserted_gap: new_gap,
-                },
+                GapResolutionOutcome { events, gap_removed: true, new_inserted_gap: new_gap },
                 event_diffs,
             )))
         }

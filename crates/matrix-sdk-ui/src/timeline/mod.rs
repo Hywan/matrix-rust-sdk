@@ -865,6 +865,17 @@ impl Timeline {
     ) -> Result<Option<EmbeddedEvent>, Error> {
         self.controller.make_replied_to(event).await
     }
+
+    pub async fn resolve_gap(&self, prev_token: Option<String>, batch_size: u16) {
+        self.room()
+            .event_cache()
+            .await
+            .expect("failed to get the `RoomEventCache`")
+            .0
+            .resolve_gap(prev_token, batch_size)
+            .await
+            .expect("failed to resolve the gap");
+    }
 }
 
 /// Test helpers, likely not very useful in production.

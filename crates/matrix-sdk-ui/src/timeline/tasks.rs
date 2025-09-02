@@ -172,6 +172,8 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
 
             RoomEventCacheUpdate::UpdateTimelineEvents { diffs, origin } => {
                 trace!("Received new timeline events diffs");
+                eprintln!("[ui] UpdateTimelineEvents");
+
                 let origin = origin.into();
                 let has_diffs = !diffs.is_empty();
 
@@ -188,6 +190,8 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
             }
 
             RoomEventCacheUpdate::PrependTimelineGap { prev_token, origin } => {
+                eprintln!("[ui] PrependTimelineGap");
+
                 trace!("Received a new timeline gap");
                 let origin = origin.into();
 
@@ -197,6 +201,8 @@ pub(in crate::timeline) async fn room_event_cache_updates_task(
             }
 
             RoomEventCacheUpdate::ResolvedTimelineGap { prev_token, new_prev_token } => {
+                eprintln!("[ui] ResolvedTimelineGap");
+
                 trace!("Received a resolved timeline gap");
 
                 if matches!(timeline_focus, TimelineFocus::Live { .. }) {

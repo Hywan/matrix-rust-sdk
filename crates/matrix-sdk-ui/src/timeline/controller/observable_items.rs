@@ -467,6 +467,7 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
             return;
         };
 
+        /*
         if let Some(new_prev_token) = new_prev_token {
             self.replace(
                 timeline_item_index,
@@ -478,8 +479,10 @@ impl<'observable_items> ObservableItemsTransaction<'observable_items> {
                 ),
             );
         } else {
-            self.remove(timeline_item_index);
-        }
+        */
+        dbg!(&timeline_item_index);
+        self.remove(timeline_item_index);
+        // }
     }
 
     /// Clear all timeline items and all remote events.

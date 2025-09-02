@@ -821,6 +821,9 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 txn_id,
                 ..
             } => {
+                eprintln!("[ui] insert events at…");
+                dbg!(event_index);
+
                 let item = Self::recycle_local_or_create_item(
                     self.items,
                     self.meta,
@@ -832,13 +835,29 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 let all_remote_events = self.items.all_remote_events();
                 let event_index = *event_index;
 
+                // We are inserting at the start of the timeline. Let's do this little trick to
+                // insert before any virtual timeline items in the remote regions. Why? Because
+                // if we are inserting at event index 0, it means it comes from a
+                // back-pagination. If that's the case, a `Gap` virtual timeline item might be
+                // present, but it maps to no timeline item index. Consequently, the following
+                // algorithm to calculate the `timeline_item_index` will compute an index
+                // _after_ the `Gap`, while we want to be _before_ the `Gap`.
+                let timeline_item_index =
+                    (event_index == 0).then(|| self.items.first_remotes_region_index());
+
+                eprintln!("found index = {:?}", timeline_item_index);
+
                 // Look for the closest `timeline_item_index` at the left of `event_index`.
-                let timeline_item_index = all_remote_events
-                    .range(0..=event_index)
-                    .rev()
-                    .find_map(|event_meta| event_meta.timeline_item_index)
-                    // The new `timeline_item_index` is the previous + 1.
-                    .map(|timeline_item_index| timeline_item_index + 1);
+                let timeline_item_index = timeline_item_index.or_else(|| {
+                    all_remote_events
+                        .range(0..=event_index)
+                        .rev()
+                        .find_map(|event_meta| event_meta.timeline_item_index)
+                        // The new `timeline_item_index` is the previous + 1.
+                        .map(|timeline_item_index| timeline_item_index + 1)
+                });
+
+                eprintln!("found index = {:?}", timeline_item_index);
 
                 // No index? Look for the closest `timeline_item_index` at the right of
                 // `event_index`.
@@ -847,6 +866,8 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                         .range(event_index + 1..)
                         .find_map(|event_meta| event_meta.timeline_item_index)
                 });
+
+                eprintln!("found index = {:?}", timeline_item_index);
 
                 // Still no index? Well, it means there is no existing `timeline_item_index`
                 // so we are inserting at the last non-local item position as a fallback.
@@ -863,6 +884,8 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                             self.items.first_remotes_region_index()
                         })
                 });
+
+                eprintln!("found index = {:?}", timeline_item_index);
 
                 trace!(
                     ?event_index,
