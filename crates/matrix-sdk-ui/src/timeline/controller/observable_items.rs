@@ -631,10 +631,10 @@ pub(crate) struct ObservableItemsTransactionIter<'observable_items_transaction> 
     inner: Take<
         Skip<
             Enumerate<
-                imbl::vector::Iter<
+                eyeball_im::imbl::vector::Iter<
                     'observable_items_transaction,
                     Arc<TimelineItem>,
-                    imbl::shared_ptr::DefaultSharedPtr,
+                    eyeball_im::imbl::shared_ptr::DefaultSharedPtr,
                 >,
             >,
         >,
