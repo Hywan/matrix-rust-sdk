@@ -1728,8 +1728,7 @@ dependencies = [
 [[package]]
 name = "eyeball"
 version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d93bd0ebf93d61d6332d3c09a96e97975968a44e19a64c947bde06e6baff383f"
+source = "git+https://github.com/Hywan/eyeball?branch=fix-util-vector-sort-when-set-compares-shallow-clones#53d4640eb5ae31fa929373adf057e000d856c0ee"
 dependencies = [
  "futures-core",
  "readlock",
@@ -1742,11 +1741,10 @@ dependencies = [
 [[package]]
 name = "eyeball-im"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43e8e9d31591be508826b875d8fe6056aebcaec3281ac0e45434ff303686c566"
+source = "git+https://github.com/Hywan/eyeball?branch=fix-util-vector-sort-when-set-compares-shallow-clones#53d4640eb5ae31fa929373adf057e000d856c0ee"
 dependencies = [
  "futures-core",
- "imbl",
+ "imbl 6.1.0",
  "tokio",
  "tracing",
 ]
@@ -1754,13 +1752,12 @@ dependencies = [
 [[package]]
 name = "eyeball-im-util"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda2d08a8fa99050bdb84d077193a371e9abd29696921971aa26ae076adb6023"
+source = "git+https://github.com/Hywan/eyeball?branch=fix-util-vector-sort-when-set-compares-shallow-clones#53d4640eb5ae31fa929373adf057e000d856c0ee"
 dependencies = [
  "arrayvec",
  "eyeball-im",
  "futures-core",
- "imbl",
+ "imbl 6.1.0",
  "pin-project-lite",
  "smallvec",
 ]
@@ -2612,6 +2609,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "imbl"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fade8ae6828627ad1fa094a891eccfb25150b383047190a3648d66d06186501"
+dependencies = [
+ "archery",
+ "bitmaps",
+ "imbl-sized-chunks",
+ "rand_core 0.9.3",
+ "rand_xoshiro",
+ "version_check",
+]
+
+[[package]]
 name = "imbl-sized-chunks"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3130,7 +3141,7 @@ dependencies = [
  "futures-util",
  "gloo-timers",
  "http",
- "imbl",
+ "imbl 5.0.0",
  "indexmap",
  "insta",
  "itertools 0.14.0",
@@ -3232,7 +3243,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.15",
  "gloo-timers",
- "imbl",
+ "imbl 5.0.0",
  "insta",
  "js-sys",
  "matrix-sdk-test-macros",
@@ -3590,7 +3601,7 @@ dependencies = [
  "futures-util",
  "fuzzy-matcher",
  "growable-bloom-filter",
- "imbl",
+ "imbl 5.0.0",
  "indexmap",
  "itertools 0.14.0",
  "matrix-sdk",
@@ -3719,7 +3730,7 @@ dependencies = [
  "color-eyre",
  "crossterm",
  "futures-util",
- "imbl",
+ "imbl 5.0.0",
  "indexmap",
  "itertools 0.14.0",
  "matrix-sdk",
