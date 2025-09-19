@@ -22,9 +22,8 @@ use std::{
 };
 
 use eyeball::{SharedObservable, Subscriber};
-use eyeball_im::VectorDiff;
+use eyeball_im::{Vector, VectorDiff};
 use futures_core::Stream;
-use imbl::vector;
 use indexmap::IndexMap;
 use matrix_sdk::{
     BoxFuture,
@@ -180,7 +179,7 @@ impl TestTimeline {
     async fn handle_live_event(&self, event: impl Into<TimelineEvent>) {
         self.controller
             .handle_remote_events_with_diffs(
-                vec![VectorDiff::Append { values: vector![event.into()] }],
+                vec![VectorDiff::Append { values: Vector::from(&[event.into()][..]) }],
                 RemoteEventOrigin::Sync,
             )
             .await;

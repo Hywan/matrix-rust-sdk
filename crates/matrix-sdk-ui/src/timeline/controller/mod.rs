@@ -16,10 +16,9 @@ use std::{collections::BTreeSet, fmt, sync::Arc};
 
 use as_variant::as_variant;
 use decryption_retry_task::DecryptionRetryTask;
-use eyeball_im::{VectorDiff, VectorSubscriberStream};
+use eyeball_im::{Vector, VectorDiff, VectorSubscriberStream};
 use eyeball_im_util::vector::{FilterMap, VectorObserverExt};
 use futures_core::Stream;
-use imbl::Vector;
 #[cfg(test)]
 use matrix_sdk::Result;
 use matrix_sdk::{

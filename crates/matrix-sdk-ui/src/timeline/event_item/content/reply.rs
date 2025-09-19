@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use imbl::Vector;
+use eyeball_im::Vector;
 use matrix_sdk::deserialized_responses::TimelineEvent;
 use ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId};
 use tracing::{debug, instrument, warn};

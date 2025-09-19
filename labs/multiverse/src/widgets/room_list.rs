@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use imbl::Vector;
+use eyeball_im::Vector;
 use matrix_sdk::{Client, Room, locks::Mutex, ruma::OwnedRoomId};
 use matrix_sdk_ui::sync_service::SyncService;
 use ratatui::{prelude::*, widgets::*};

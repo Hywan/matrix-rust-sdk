@@ -15,9 +15,8 @@
 
 //! Types for searching the public room directory.
 
-use eyeball_im::{ObservableVector, VectorDiff};
+use eyeball_im::{ObservableVector, Vector, VectorDiff};
 use futures_core::Stream;
-use imbl::Vector;
 use ruma::{
     OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId,
     api::client::directory::get_public_rooms_filtered::v3::Request as PublicRoomsFilterRequest,

@@ -14,9 +14,8 @@
 
 use assert_matches::assert_matches;
 use assert_matches2::assert_let;
-use eyeball_im::VectorDiff;
+use eyeball_im::{Vector, VectorDiff};
 use futures_util::StreamExt;
-use imbl::vector;
 use matrix_sdk_test::{
     ALICE, BOB, CAROL, async_test,
     event_factory::{EventFactory, PreviousMembership},
@@ -56,10 +55,12 @@ async fn test_initial_events() {
         .controller
         .handle_remote_events_with_diffs(
             vec![VectorDiff::Append {
-                values: vector![
-                    f.text_msg("A").sender(*ALICE).into_event(),
-                    f.text_msg("B").sender(*BOB).into_event()
-                ],
+                values: Vector::from(
+                    &[
+                        f.text_msg("A").sender(*ALICE).into_event(),
+                        f.text_msg("B").sender(*BOB).into_event(),
+                    ][..],
+                ),
             }],
             RemoteEventOrigin::Sync,
         )
@@ -105,7 +106,7 @@ async fn test_replace_with_initial_events_and_read_marker() {
     timeline
         .controller
         .handle_remote_events_with_diffs(
-            vec![VectorDiff::Append { values: vector![ev] }],
+            vec![VectorDiff::Append { values: Vector::from(&[ev][..]) }],
             RemoteEventOrigin::Sync,
         )
         .await;
@@ -295,7 +296,7 @@ async fn test_internal_id_prefix() {
     timeline
         .controller
         .handle_remote_events_with_diffs(
-            vec![VectorDiff::Append { values: vector![ev_a, ev_b, ev_c] }],
+            vec![VectorDiff::Append { values: Vector::from(&[ev_a, ev_b, ev_c][..]) }],
             RemoteEventOrigin::Sync,
         )
         .await;
@@ -478,7 +479,7 @@ async fn test_replace_with_initial_events_when_batched() {
     timeline
         .controller
         .handle_remote_events_with_diffs(
-            vec![VectorDiff::Append { values: vector![ev] }],
+            vec![VectorDiff::Append { values: Vector::from(&[ev][..]) }],
             RemoteEventOrigin::Sync,
         )
         .await;

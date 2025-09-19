@@ -14,7 +14,7 @@
 
 use std::{ops::Deref, sync::Arc};
 
-use imbl::Vector;
+use eyeball_im::Vector;
 use ruma::EventId;
 
 #[cfg(doc)]

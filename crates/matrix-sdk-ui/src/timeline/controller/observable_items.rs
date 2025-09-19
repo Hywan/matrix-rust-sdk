@@ -23,9 +23,8 @@ use std::{
 use bitflags::bitflags;
 use eyeball_im::{
     ObservableVector, ObservableVectorEntries, ObservableVectorEntry, ObservableVectorTransaction,
-    ObservableVectorTransactionEntry, VectorSubscriber,
+    ObservableVectorTransactionEntry, Vector, VectorSubscriber,
 };
-use imbl::Vector;
 use ruma::EventId;
 
 use super::{TimelineItem, metadata::EventMeta};

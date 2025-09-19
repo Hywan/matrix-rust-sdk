@@ -29,9 +29,8 @@
 
 use std::sync::Arc;
 
-use eyeball_im::{ObservableVector, VectorSubscriberBatchedStream};
+use eyeball_im::{ObservableVector, Vector, VectorSubscriberBatchedStream};
 use futures_util::pin_mut;
-use imbl::Vector;
 use matrix_sdk::{
     Client, deserialized_responses::SyncOrStrippedState, executor::AbortOnDrop, locks::Mutex,
 };

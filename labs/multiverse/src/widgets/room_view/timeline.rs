@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use imbl::Vector;
+use eyeball_im::Vector;
 use indexmap::IndexMap;
 use matrix_sdk::ruma::{
     OwnedUserId, UserId,

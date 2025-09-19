@@ -16,8 +16,8 @@ use crossterm::{
     },
     execute,
 };
+use eyeball_im::Vector;
 use futures_util::{StreamExt as _, pin_mut};
-use imbl::Vector;
 use layout::Flex;
 use matrix_sdk::{
     AuthSession, Client, Room, SearchIndexStoreKind, SqliteCryptoStore, SqliteEventCacheStore,

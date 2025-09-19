@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crossterm::event::{Event, KeyCode, KeyModifiers};
+use eyeball_im::Vector;
 use futures_util::StreamExt;
-use imbl::Vector;
 use input::MessageOrCommand;
 use invited_room::InvitedRoomView;
 use matrix_sdk::{

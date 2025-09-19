@@ -20,11 +20,10 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use algorithms::rfind_event_by_item_id;
 use event_item::TimelineItemHandle;
-use eyeball_im::VectorDiff;
+use eyeball_im::{Vector, VectorDiff};
 #[cfg(feature = "unstable-msc4274")]
 use futures::SendGallery;
 use futures_core::Stream;
-use imbl::Vector;
 use matrix_sdk::{
     Result,
     attachment::{AttachmentInfo, Thumbnail},

@@ -509,7 +509,7 @@ mod tests {
     use std::fmt::Debug;
 
     use assert_matches::assert_matches;
-    use imbl::{Vector, vector};
+    use eyeball_im::Vector;
 
     use super::{
         super::{Chunk, ChunkIdentifierGenerator, LinkedChunk, Update},
@@ -556,8 +556,8 @@ mod tests {
             &mut accumulator,
             as_vector.take(),
             &[
-                VectorDiff::Append { values: vector!['a', 'b', 'c'] },
-                VectorDiff::Append { values: vector!['d'] },
+                VectorDiff::Append { values: Vector::from(&['a', 'b', 'c'][..]) },
+                VectorDiff::Append { values: Vector::from(&['d'][..]) },
             ],
         );
 
@@ -609,8 +609,8 @@ mod tests {
             &mut accumulator,
             as_vector.take(),
             &[
-                VectorDiff::Append { values: vector!['e', 'f', 'g'] },
-                VectorDiff::Append { values: vector!['h'] },
+                VectorDiff::Append { values: Vector::from(&['e', 'f', 'g'][..]) },
+                VectorDiff::Append { values: Vector::from(&['h'][..]) },
             ],
         );
 
@@ -735,7 +735,9 @@ mod tests {
         // Ensure the “reconstitued” vector is the one expected.
         assert_eq!(
             accumulator,
-            vector!['m', 'a', 'w', 'x', 'y', 'b', 'd', 'i', 'j', 'k', 'l', 'e', 'f', 'g', 'z', 'h']
+            Vector::from(
+                &['m', 'a', 'w', 'x', 'y', 'b', 'd', 'i', 'j', 'k', 'l', 'e', 'f', 'g', 'z', 'h'][..]
+            )
         );
 
         // Replace element 8 by an uppercase J.
@@ -910,10 +912,10 @@ mod tests {
             &mut accumulator,
             as_vector.take(),
             &[
-                VectorDiff::Append { values: vector!['a', 'b'] },
-                VectorDiff::Append { values: vector!['c'] },
-                VectorDiff::Append { values: vector!['d', 'e', 'f'] },
-                VectorDiff::Append { values: vector!['g'] },
+                VectorDiff::Append { values: Vector::from(&['a', 'b'][..]) },
+                VectorDiff::Append { values: Vector::from(&['c'][..]) },
+                VectorDiff::Append { values: Vector::from(&['d', 'e', 'f'][..]) },
+                VectorDiff::Append { values: Vector::from(&['g'][..]) },
             ],
         );
 

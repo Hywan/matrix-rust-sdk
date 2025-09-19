@@ -17,9 +17,9 @@ use std::{
     sync::Arc,
 };
 
+use eyeball_im::Vector;
 use futures_core::Stream;
 use futures_util::pin_mut;
-use imbl::Vector;
 use itertools::{Either, Itertools as _};
 use matrix_sdk::{
     Client, Room,
@@ -515,7 +515,7 @@ async fn decrypt_by_index<P: RoomDataProvider, D: Decryptor>(
 mod tests {
     use std::{collections::BTreeMap, sync::Arc, time::SystemTime};
 
-    use imbl::vector;
+    use eyeball_im::Vector;
     use matrix_sdk::{
         crypto::types::events::UtdCause,
         deserialized_responses::{AlgorithmInfo, EncryptionInfo, VerificationState},
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn test_non_events_are_not_retried() {
         // Given a timeline with only non-events
-        let timeline = vector![TimelineItem::read_marker(), date_divider()];
+        let timeline = Vector::from(&[TimelineItem::read_marker(), date_divider()][..]);
         // When we ask what to retry
         let answer = compute_event_indices_to_retry_decryption(&timeline, always_retry);
         // Then we retry nothing
@@ -557,7 +557,7 @@ mod tests {
     #[test]
     fn test_non_remote_events_are_not_retried() {
         // Given a timeline with only local events
-        let timeline = vector![local_event()];
+        let timeline = Vector::from(&[local_event()][..]);
         // When we ask what to retry
         let answer = compute_event_indices_to_retry_decryption(&timeline, always_retry);
         // Then we retry nothing
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn test_utds_are_retried() {
         // Given a timeline with a UTD
-        let timeline = vector![utd_event("session1")];
+        let timeline = Vector::from(&[utd_event("session1")][..]);
         // When we ask what to retry
         let answer = compute_event_indices_to_retry_decryption(&timeline, always_retry);
         // Then we retry decrypting it, and don't refetch any encryption info
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn test_remote_decrypted_info_is_refetched() {
         // Given a timeline with a decrypted event
-        let timeline = vector![decrypted_event("session1")];
+        let timeline = Vector::from(&[decrypted_event("session1")][..]);
         // When we ask what to retry
         let answer = compute_event_indices_to_retry_decryption(&timeline, always_retry);
         // Then we don't need to decrypt anything, but we do refetch the encryption info
@@ -597,17 +597,19 @@ mod tests {
 
         // And we have a timeline containing non-events, local events, UTDs and
         // decrypted events
-        let timeline = vector![
-            TimelineItem::read_marker(),
-            utd_event("session1"),
-            utd_event("session1"),
-            date_divider(),
-            utd_event("session2"),
-            decrypted_event("session1"),
-            decrypted_event("session1"),
-            decrypted_event("session2"),
-            local_event(),
-        ];
+        let timeline = Vector::from(
+            &[
+                TimelineItem::read_marker(),
+                utd_event("session1"),
+                utd_event("session1"),
+                date_divider(),
+                utd_event("session2"),
+                decrypted_event("session1"),
+                decrypted_event("session1"),
+                decrypted_event("session2"),
+                local_event(),
+            ][..],
+        );
 
         // When we ask what to retry
         let answer = compute_event_indices_to_retry_decryption(&timeline, retry);

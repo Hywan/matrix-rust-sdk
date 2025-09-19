@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use assert_matches2::assert_let;
-use eyeball_im::VectorDiff;
-use imbl::Vector;
+use eyeball_im::{Vector, VectorDiff};
 use matrix_sdk::{
     Client, ThreadingSupport, assert_let_timeout,
     deserialized_responses::{ThreadSummaryStatus, TimelineEvent},

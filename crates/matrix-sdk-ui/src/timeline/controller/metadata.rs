@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
 };
 
-use imbl::Vector;
+use eyeball_im::Vector;
 use matrix_sdk::deserialized_responses::EncryptionInfo;
 use ruma::{
     EventId, OwnedEventId, OwnedUserId,

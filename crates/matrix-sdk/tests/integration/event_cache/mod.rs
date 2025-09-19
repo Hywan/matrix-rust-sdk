@@ -2,9 +2,8 @@ use std::{ops::Not, sync::Arc, time::Duration};
 
 use assert_matches::assert_matches;
 use assert_matches2::assert_let;
-use eyeball_im::VectorDiff;
+use eyeball_im::{Vector, VectorDiff};
 use futures_util::FutureExt;
-use imbl::Vector;
 use matrix_sdk::{
     assert_let_timeout, assert_next_matches_with_timeout,
     deserialized_responses::TimelineEvent,

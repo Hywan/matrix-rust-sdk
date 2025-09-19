@@ -14,8 +14,7 @@
 
 use assert_matches::assert_matches;
 use assert_matches2::assert_let;
-use eyeball_im::VectorDiff;
-use imbl::vector;
+use eyeball_im::{Vector, VectorDiff};
 use matrix_sdk_test::{ALICE, BOB, async_test};
 use ruma::{
     event_id,
@@ -171,9 +170,9 @@ async fn test_reaction_redaction_timeline_filter() {
         .controller
         .handle_remote_events_with_diffs(
             vec![VectorDiff::Append {
-                values: vector![
-                    f.redacted(*ALICE, RedactedReactionEventContent::new()).into_event()
-                ],
+                values: Vector::from(
+                    &[f.redacted(*ALICE, RedactedReactionEventContent::new()).into_event()][..],
+                ),
             }],
             RemoteEventOrigin::Sync,
         )

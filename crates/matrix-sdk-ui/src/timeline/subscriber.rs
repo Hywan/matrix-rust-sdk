@@ -19,10 +19,9 @@ use std::{
 };
 
 use eyeball::Subscriber;
-use eyeball_im::{VectorDiff, VectorSubscriberBatchedStream};
+use eyeball_im::{Vector, VectorDiff, VectorSubscriberBatchedStream};
 use eyeball_im_util::vector::{Skip, VectorObserverExt};
 use futures_core::Stream;
-use imbl::Vector;
 use pin_project_lite::pin_project;
 
 use super::{TimelineDropHandle, controller::ObservableItems, item::TimelineItem};

@@ -15,10 +15,9 @@
 use std::{sync::Arc, time::Duration};
 
 use assert_matches2::{assert_let, assert_matches};
-use eyeball_im::VectorDiff;
+use eyeball_im::{Vector, VectorDiff};
 use futures_core::Stream;
 use futures_util::{FutureExt as _, StreamExt as _};
-use imbl::vector;
 use matrix_sdk::assert_next_matches_with_timeout;
 use matrix_sdk_test::{ALICE, BOB, async_test};
 use ruma::{
@@ -202,15 +201,17 @@ async fn test_initial_reaction_timestamp_is_stored() {
         .controller
         .handle_remote_events_with_diffs(
             vec![VectorDiff::Append {
-                values: vector![
-                    // Reaction comes first.
-                    f.reaction(&message_event_id, REACTION_KEY)
-                        .sender(*ALICE)
-                        .server_ts(reaction_timestamp)
-                        .into_event(),
-                    // Event comes next.
-                    f.text_msg("A").sender(*ALICE).event_id(&message_event_id).into_event(),
-                ],
+                values: Vector::from(
+                    &[
+                        // Reaction comes first.
+                        f.reaction(&message_event_id, REACTION_KEY)
+                            .sender(*ALICE)
+                            .server_ts(reaction_timestamp)
+                            .into_event(),
+                        // Event comes next.
+                        f.text_msg("A").sender(*ALICE).event_id(&message_event_id).into_event(),
+                    ][..],
+                ),
             }],
             RemoteEventOrigin::Sync,
         )
@@ -270,7 +271,9 @@ async fn test_reinserted_item_keeps_reactions() {
 
     timeline
         .handle_event_update(
-            vec![VectorDiff::Append { values: vector![target_event.clone(), reaction_event] }],
+            vec![VectorDiff::Append {
+                values: Vector::from(&[target_event.clone(), reaction_event][..]),
+            }],
             RemoteEventOrigin::Sync,
         )
         .await;

@@ -15,9 +15,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use eyeball::{ObservableWriteGuard, SharedObservable, Subscriber};
-use eyeball_im::{ObservableVector, VectorSubscriberBatchedStream};
+use eyeball_im::{ObservableVector, Vector, VectorSubscriberBatchedStream};
 use futures_util::pin_mut;
-use imbl::Vector;
 use itertools::Itertools;
 use matrix_sdk::{Client, Error, executor::AbortOnDrop, locks::Mutex, paginators::PaginationToken};
 use matrix_sdk_common::executor::spawn;
