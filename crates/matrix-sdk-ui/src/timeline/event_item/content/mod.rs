@@ -535,6 +535,11 @@ impl TimelineItemContent {
         as_variant!(self, Self::MsgLike)?.thread_root.clone()
     }
 
+    /// Information about the thread this item is the root for.
+    pub fn thread_summary(&self) -> Option<ThreadSummary> {
+        as_variant!(self, Self::MsgLike)?.thread_summary.clone()
+    }
+
     /// Get the event this message is replying to, if any.
     pub fn in_reply_to(&self) -> Option<InReplyToDetails> {
         as_variant!(self, Self::MsgLike)?.in_reply_to.clone()
@@ -557,11 +562,6 @@ impl TimelineItemContent {
                 None
             }
         }
-    }
-
-    /// Information about the thread this item is the root for.
-    pub fn thread_summary(&self) -> Option<ThreadSummary> {
-        as_variant!(self, Self::MsgLike)?.thread_summary.clone()
     }
 
     /// Return a mutable handle to the reactions of this item.
