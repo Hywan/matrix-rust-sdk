@@ -31,6 +31,9 @@ use crate::deserialized_responses::{ThreadSummary, ThreadSummaryStatus};
 enum RelationsType {
     #[serde(rename = "m.thread")]
     Thread,
+
+    #[serde(rename = "m.replace")]
+    Replace,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +64,7 @@ pub fn extract_thread_root_from_content(
     let relates_to = content.deserialize_as_unchecked::<SimplifiedContent>().ok()?.relates_to?;
     match relates_to.rel_type {
         RelationsType::Thread => relates_to.event_id,
+        RelationsType::Replace => None,
     }
 }
 
@@ -75,6 +79,15 @@ pub fn extract_thread_root(event: &Raw<AnySyncTimelineEvent>) -> Option<OwnedEve
     let relates_to = event.get_field::<SimplifiedContent>("content").ok().flatten()?.relates_to?;
     match relates_to.rel_type {
         RelationsType::Thread => relates_to.event_id,
+        RelationsType::Replace => None,
+    }
+}
+
+pub fn extract_edited_event(event: &Raw<AnySyncTimelineEvent>) -> Option<OwnedEventId> {
+    let relates_to = event.get_field::<SimplifiedContent>("content").ok().flatten()?.relates_to?;
+    match relates_to.rel_type {
+        RelationsType::Replace => relates_to.event_id,
+        RelationsType::Thread => None,
     }
 }
 
