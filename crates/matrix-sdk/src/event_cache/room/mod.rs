@@ -621,7 +621,7 @@ mod private {
             OwnedLinkedChunkId, Position, Update,
             lazy_loader::{self},
         },
-        serde_helpers::extract_thread_root,
+        serde_helpers::{extract_edited_event, extract_thread_root},
         sync::Timeline,
     };
     use matrix_sdk_common::executor::spawn;
@@ -1463,23 +1463,64 @@ mod private {
 
             let mut new_events_by_thread: BTreeMap<_, Vec<_>> = BTreeMap::new();
 
-            for event in events {
+            for event in &events {
                 self.maybe_apply_new_redaction(&event).await?;
 
                 if self.enabled_thread_support {
+                    // The event has a `m.relates_to/rel_type` field set to `m.thread`. It contains
+                    // the thread root.
                     if let Some(thread_root) = extract_thread_root(event.raw()) {
                         new_events_by_thread.entry(thread_root).or_default().push(event.clone());
-                    } else if let Some(event_id) = event.event_id() {
-                        // If we spot the root of a thread, add it to its linked chunk.
-                        if self.threads.contains_key(&event_id) {
-                            new_events_by_thread.entry(event_id).or_default().push(event.clone());
+                    }
+                    // The event has a `m.relates_to/rel_type` field set to `m.replace`. It might
+                    // replace an event in a thread; if that's the case, we don't know which one
+                    // (because the event doesn't hold this information). We
+                    // have to do 2 things:
+                    //
+                    // 1. check the edit event targets an event in a thread,
+                    // 2. find the thread and push the event into it.
+                    else if let Some(targeted_event_id) = extract_edited_event(event.raw()) {
+                        // Where to look for this event?
+                        //
+                        // First off, let's start by `events` itself! It's possible this edit
+                        // relates to an event that is part of the same sync.
+                        if let Some(targeted_event) = events
+                            .iter()
+                            .find(|event| event.event_id().as_deref() == Some(&targeted_event_id))
+
+                            // The targeted event has been found! Let's see if it is part of a thread.
+                            // If yes, it means `event` is part of a thread, and is editing an event
+                            // that is also part of the same thread.
+                            && let Some(thread_root) = extract_thread_root(targeted_event.raw())
+                        {
+                            new_events_by_thread
+                                .entry(thread_root)
+                                .or_default()
+                                .push(event.clone());
+                        }
+                        // Second, let's look for `targeted_event_id` in in-memory threads.
+                        else if let Some(thread_root) =
+                            self.threads.iter().find_map(|(thread_root, thread_event_cache)| {
+                                thread_event_cache
+                                    .contains_event(&targeted_event_id)
+                                    .then(|| thread_root.clone())
+                            })
+                        {
+                            new_events_by_thread
+                                .entry(thread_root)
+                                .or_default()
+                                .push(event.clone());
+                        }
+                        // Third, let's look for `targeted_event_id` in the store.
+                        else {
+                            // TODO
                         }
                     }
                 }
 
                 // Save a bundled thread event, if there was one.
-                if let Some(bundled_thread) = event.bundled_latest_thread_event {
-                    self.save_event([*bundled_thread]).await?;
+                if let Some(bundled_thread) = &event.bundled_latest_thread_event {
+                    self.save_event([*bundled_thread.clone()]).await?;
                 }
             }
 
@@ -1529,6 +1570,7 @@ mod private {
                 };
 
                 let prev_summary = target_event.thread_summary.summary();
+
                 let mut latest_reply =
                     prev_summary.as_ref().and_then(|summary| summary.latest_reply.clone());
 

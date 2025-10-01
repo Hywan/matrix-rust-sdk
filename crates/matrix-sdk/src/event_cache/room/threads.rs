@@ -21,7 +21,7 @@ use matrix_sdk_base::{
     event_cache::{Event, Gap},
     linked_chunk::{ChunkContent, OwnedLinkedChunkId, Position},
 };
-use ruma::{OwnedEventId, OwnedRoomId};
+use ruma::{EventId, OwnedEventId, OwnedRoomId};
 use tokio::sync::broadcast::{Receiver, Sender};
 use tracing::trace;
 
@@ -303,5 +303,12 @@ impl ThreadEventCache {
     /// Returns the latest event ID in this thread, if any.
     pub fn latest_event_id(&self) -> Option<OwnedEventId> {
         self.chunk.revents().next().and_then(|(_position, event)| event.event_id())
+    }
+
+    pub(super) fn contains_event(&self, event_id: &EventId) -> bool {
+        self.chunk
+            .revents()
+            .find(|(_, event)| event.event_id().as_deref() == Some(event_id))
+            .is_some()
     }
 }
