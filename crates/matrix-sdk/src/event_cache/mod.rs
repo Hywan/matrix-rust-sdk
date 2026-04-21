@@ -64,7 +64,7 @@ mod persistence;
 mod redecryptor;
 mod tasks;
 
-use self::caches::{Caches, room::RoomEventCacheLinkedChunkUpdate};
+use self::caches::{CachesForRoom, room::RoomEventCacheLinkedChunkUpdate};
 #[cfg(feature = "e2e-encryption")]
 pub use self::redecryptor::{DecryptionRetryRequest, RedecryptorReport};
 pub use self::{
@@ -461,7 +461,8 @@ impl Default for EventCacheConfig {
     }
 }
 
-type CachesByRoom = HashMap<OwnedRoomId, Caches>;
+/// Type alias to represent the caches for all the rooms.
+type CachesForAllRooms = HashMap<OwnedRoomId, CachesForRoom>;
 
 struct EventCacheInner {
     /// A weak reference to the inner client, useful when trying to get a handle
@@ -485,7 +486,7 @@ struct EventCacheInner {
     /// Lazily-filled cache of live [`RoomEventCache`], once per room.
     //
     // It's behind an `Arc` to get owned locks.
-    by_room: Arc<RwLock<CachesByRoom>>,
+    by_room: Arc<RwLock<CachesForAllRooms>>,
 
     /// Handles to keep alive the task listening to updates.
     drop_handles: OnceLock<Arc<EventCacheDropHandles>>,
@@ -656,7 +657,7 @@ impl EventCacheInner {
     async fn all_caches_for_room(
         &self,
         room_id: &RoomId,
-    ) -> Result<OwnedRwLockReadGuard<CachesByRoom, Caches>> {
+    ) -> Result<OwnedRwLockReadGuard<CachesForAllRooms, CachesForRoom>> {
         // Fast path: the entry exists; let's acquire a read lock, it's cheaper than a
         // write lock.
         match OwnedRwLockReadGuard::try_map(self.by_room.clone().read_owned().await, |by_room| {
@@ -679,7 +680,7 @@ impl EventCacheInner {
                         Err(by_room_guard) => by_room_guard,
                     };
 
-                let caches = Caches::new(
+                let caches = CachesForRoom::new(
                     &self.client,
                     room_id,
                     self.generic_update_sender.clone(),
@@ -699,7 +700,7 @@ impl EventCacheInner {
                 Ok(OwnedRwLockWriteGuard::try_downgrade_map(by_room_guard, |by_room| {
                     by_room.get(room_id)
                 })
-                .expect("`Caches` has just been inserted"))
+                .expect("`CachesForRoom` has just been inserted"))
             }
         }
     }

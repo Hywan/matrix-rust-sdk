@@ -37,12 +37,12 @@ pub mod thread;
 
 /// A type to hold all the caches for a given room.
 #[derive(Debug)]
-pub(super) struct Caches {
+pub(super) struct CachesForRoom {
     pub room: room::RoomEventCache,
 }
 
-impl Caches {
-    /// Create a new [`Caches`].
+impl CachesForRoom {
+    /// Create a new [`CachesForRoom`].
     pub async fn new(
         weak_client: &WeakClient,
         room_id: &RoomId,
@@ -130,14 +130,14 @@ impl Caches {
     }
 
     /// Try to acquire exclusive locks over all the event caches managed by
-    /// this [`Caches`], in order to reset all the in-memory data.
+    /// this [`CachesForRoom`], in order to reset all the in-memory data.
     ///
     /// Note that this method takes `&mut self`, ensuring only one reset can
     /// happen at a time.
     ///
     /// If the returned value is dropped, no data will be reset.
-    pub async fn prepare_to_reset(&mut self) -> Result<ResetCaches<'_>> {
-        ResetCaches::new(self).await
+    pub async fn prepare_to_reset(&mut self) -> Result<ResetCachesForRoom<'_>> {
+        ResetCachesForRoom::new(self).await
     }
 
     /// Get all events from all the event caches manged by this [`Cacches`].
@@ -152,19 +152,19 @@ impl Caches {
 }
 
 /// Type holding exclusive locks over all event caches managed by a
-/// [`Caches`].
+/// [`CachesForRoom`].
 ///
-/// To reset all the event caches, call [`ResetCaches::reset_all`]. If this type
-/// is dropped, no reset happens and the exclusive lock is released.
-pub(super) struct ResetCaches<'c> {
+/// To reset all the event caches, call [`ResetCachesForRoom::reset_all`]. If
+/// this type is dropped, no reset happens and the exclusive lock is released.
+pub(super) struct ResetCachesForRoom<'c> {
     room_lock: (&'c room::RoomEventCache, room::RoomEventCacheStateLockWriteGuard<'c>),
 }
 
-impl<'c> ResetCaches<'c> {
-    /// Create a new [`ResetCaches`].
+impl<'c> ResetCachesForRoom<'c> {
+    /// Create a new [`ResetCachesForRoom`].
     ///
     /// It can fail if acquiring an exclusive lock fails.
-    async fn new(Caches { room }: &'c mut Caches) -> Result<Self> {
+    async fn new(CachesForRoom { room }: &'c mut CachesForRoom) -> Result<Self> {
         Ok(Self { room_lock: (room, room.state().write().await?) })
     }
 
