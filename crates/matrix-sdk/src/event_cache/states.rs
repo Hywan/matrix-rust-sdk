@@ -304,6 +304,20 @@ impl StateLock {
             }
         }
     }
+
+    /// Build a new [`CacheStateLock`], which acts as a pair composed of
+    /// [`selectors::CacheState`] and [`StateLock`].
+    ///
+    /// See the documentation of [`CacheStateLock`] to learn more.
+    pub(super) fn new_cache_state_lock<Selector>(
+        &self,
+        cache_state_selector: Selector,
+    ) -> CacheStateLock<Selector>
+    where
+        Selector: selectors::CacheState,
+    {
+        CacheStateLock { cache_state_selector, state_lock: self.clone() }
+    }
 }
 
 /// The read lock guard returned by [`StateLock::read`].
@@ -417,5 +431,56 @@ impl<'state, S> Deref for StateLockWriteGuard<'state, S> {
 impl<'state, S> DerefMut for StateLockWriteGuard<'state, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.state
+    }
+}
+
+/// A wrapper around [`State`] with a [`CacheStateSelector`], facilitating the
+/// embedding of these API in a single type.
+pub struct CacheStateLock<Selector>
+where
+    Selector: selectors::CacheState,
+{
+    cache_state_selector: Selector,
+    state_lock: StateLock,
+}
+
+impl<Selector> CacheStateLock<Selector>
+where
+    Selector: selectors::CacheState,
+{
+    /// Lock this [`CacheStateLock`] by locking the full [`State`] with
+    /// per-thread shared access.
+    ///
+    /// This method locks the per-thread lock over the state, and then locks
+    /// the cross-process lock over the store. It returns an RAII guard
+    /// which will drop the read access to the state and to the store when
+    /// dropped.
+    ///
+    /// If the cross-process lock over the store is dirty (see
+    /// [`EventCacheStoreLockState`]), the state is reloaded.
+    pub async fn read(&self) -> Result<StateLockReadGuard<'_, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        EventCacheError: for<'a> From<&'a Selector>,
+    {
+        self.state_lock.read(&self.cache_state_selector).await
+    }
+
+    /// Lock this [`CacheStateLock`] by locking the full [`State`] with
+    /// exclusive per-thread write access.
+    ///
+    /// This method locks the per-thread lock over the state, and then locks
+    /// the cross-process lock over the store. It returns an RAII guard
+    /// which will drop the write access to the state and to the store when
+    /// dropped.
+    ///
+    /// If the cross-process lock over the store is dirty (see
+    /// [`EventCacheStoreLockState`]), the state is reloaded.
+    pub async fn write(&self) -> Result<StateLockWriteGuard<'_, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        EventCacheError: for<'a> From<&'a Selector>,
+    {
+        self.state_lock.write(&self.cache_state_selector).await
     }
 }
