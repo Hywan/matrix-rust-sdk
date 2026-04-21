@@ -64,21 +64,22 @@ mod persistence;
 mod redecryptor;
 mod tasks;
 
-use caches::{Caches, room::RoomEventCacheLinkedChunkUpdate};
-pub use caches::{
-    TimelineVectorDiffs,
-    event_focused::EventFocusThreadMode,
-    pagination::{BackPaginationOutcome, PaginationStatus},
-    room::{
-        RoomEventCache, RoomEventCacheGenericUpdate, RoomEventCacheSubscriber,
-        RoomEventCacheUpdate, pagination::RoomPagination,
-    },
-    thread::pagination::ThreadPagination,
-};
+use self::caches::{Caches, room::RoomEventCacheLinkedChunkUpdate};
 #[cfg(feature = "e2e-encryption")]
-pub use redecryptor::{DecryptionRetryRequest, RedecryptorReport};
-
-pub use crate::event_cache::automatic_pagination::AutomaticPagination;
+pub use self::redecryptor::{DecryptionRetryRequest, RedecryptorReport};
+pub use self::{
+    automatic_pagination::AutomaticPagination,
+    caches::{
+        TimelineVectorDiffs,
+        event_focused::EventFocusThreadMode,
+        pagination::{BackPaginationOutcome, PaginationStatus},
+        room::{
+            RoomEventCache, RoomEventCacheGenericUpdate, RoomEventCacheSubscriber,
+            RoomEventCacheUpdate, pagination::RoomPagination,
+        },
+        thread::pagination::ThreadPagination,
+    },
+};
 
 /// An error observed in the [`EventCache`].
 #[derive(thiserror::Error, Clone, Debug)]
