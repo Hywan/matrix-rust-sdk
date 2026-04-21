@@ -1,0 +1,421 @@
+// Copyright 2026 The Matrix.org Foundation C.I.C.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! This module handles the state of the [`EventCache`].
+
+#![allow(private_interfaces)]
+
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
+
+use matrix_sdk_base::event_cache::store::{
+    EventCacheStoreLock, EventCacheStoreLockGuard, EventCacheStoreLockState,
+};
+use ruma::{OwnedEventId, OwnedRoomId};
+use tokio::sync::{Mutex, RwLock, RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard};
+
+use super::{EventCacheError, Result};
+
+mod selectors {
+    use super::{
+        EventCacheError, OwnedEventId, OwnedRoomId, PinnedEventCacheState, RoomEventCacheState,
+        State, ThreadEventCacheState,
+    };
+
+    /// Trait to select a specific state of a cache inside a [`State`].
+    pub trait CacheState {
+        /// The type of the specific state of cache.
+        type Item;
+
+        /// Immutably select a specific state of a cache inside a [`State`].
+        fn select<'state>(&self, state: &'state State) -> Option<&'state Self::Item>;
+
+        /// Mutably select a specific state of a cache inside a [`State`].
+        fn select_mut<'state>(&self, state: &'state mut State) -> Option<&'state mut Self::Item>;
+    }
+
+    /// Select a [`RoomEventCacheState`] in [`State`].
+    pub struct RoomEventCacheStateSelector(OwnedRoomId);
+
+    impl CacheState for RoomEventCacheStateSelector {
+        type Item = RoomEventCacheState;
+
+        fn select<'state>(&self, state: &'state State) -> Option<&'state Self::Item> {
+            state.rooms.get(&self.0)
+        }
+
+        fn select_mut<'state>(&self, state: &'state mut State) -> Option<&'state mut Self::Item> {
+            state.rooms.get_mut(&self.0)
+        }
+    }
+
+    impl From<&RoomEventCacheStateSelector> for EventCacheError {
+        fn from(value: &RoomEventCacheStateSelector) -> Self {
+            Self::RoomNotFound { room_id: value.0.clone() }
+        }
+    }
+
+    /// Select a [`ThreadEventCacheState`] in [`State`].
+    pub struct ThreadEventCacheStateSelector(OwnedRoomId, OwnedEventId);
+
+    impl CacheState for ThreadEventCacheStateSelector {
+        type Item = ThreadEventCacheState;
+
+        fn select<'state>(&self, state: &'state State) -> Option<&'state Self::Item> {
+            state.threads.get(&self.0).and_then(|threads_for_room| threads_for_room.get(&self.1))
+        }
+
+        fn select_mut<'state>(&self, state: &'state mut State) -> Option<&'state mut Self::Item> {
+            state
+                .threads
+                .get_mut(&self.0)
+                .and_then(|threads_for_room| threads_for_room.get_mut(&self.1))
+        }
+    }
+
+    impl From<&ThreadEventCacheStateSelector> for EventCacheError {
+        fn from(value: &ThreadEventCacheStateSelector) -> Self {
+            Self::ThreadNotFound { room_id: value.0.clone(), thread_id: value.1.clone() }
+        }
+    }
+
+    /// Select a [`PinnedEventCacheState`] in [`State`].
+    pub struct PinnedEventCacheStateSelector(OwnedRoomId);
+
+    impl CacheState for PinnedEventCacheStateSelector {
+        type Item = PinnedEventCacheState;
+
+        fn select<'state>(&self, state: &'state State) -> Option<&'state Self::Item> {
+            state.pinned_events.get(&self.0)
+        }
+
+        fn select_mut<'state>(&self, state: &'state mut State) -> Option<&'state mut Self::Item> {
+            state.pinned_events.get_mut(&self.0)
+        }
+    }
+
+    impl From<&PinnedEventCacheStateSelector> for EventCacheError {
+        fn from(value: &PinnedEventCacheStateSelector) -> Self {
+            Self::PinnedEventsNotFound { room_id: value.0.clone() }
+        }
+    }
+}
+
+// Temporary types to make the code compiles. Will be removed one after the
+// other.
+pub struct RoomEventCacheState;
+pub struct ThreadEventCacheState;
+pub struct PinnedEventCacheState;
+
+/// The type containing all the states, for real.
+struct State {
+    store: EventCacheStoreLock,
+    rooms: HashMap<OwnedRoomId, RoomEventCacheState>,
+    threads: HashMap<OwnedRoomId, HashMap<OwnedEventId, ThreadEventCacheState>>,
+    pinned_events: HashMap<OwnedRoomId, PinnedEventCacheState>,
+}
+
+/// State for the entire Event Cache.
+///
+/// This aims at containing all the inner mutable states that ought to be
+/// updated, behind a per-process lock and a cross-process lock.
+///
+/// This type can be cloned at low-cost. It will do a shallow clone.
+#[derive(Clone)]
+pub struct StateLock {
+    inner: Arc<StateLockInner>,
+}
+
+struct StateLockInner {
+    /// The per-process lock around the real state.
+    locked_state: RwLock<State>,
+
+    /// A lock taken to avoid multiple attempts to upgrade from a read lock
+    /// to a write lock.
+    ///
+    /// Please see inline comment of [`Self::read`] to understand why it
+    /// exists.
+    state_lock_upgrade_mutex: Mutex<()>,
+}
+
+impl StateLock {
+    /// Construct a new [`EventCacheStateLock`].
+    pub fn new(store: EventCacheStoreLock) -> Self {
+        Self {
+            inner: Arc::new(StateLockInner {
+                locked_state: RwLock::new(State {
+                    store,
+                    rooms: HashMap::new(),
+                    threads: HashMap::new(),
+                    pinned_events: HashMap::new(),
+                }),
+                state_lock_upgrade_mutex: Mutex::new(()),
+            }),
+        }
+    }
+
+    /// Lock this [`StateLock`] with per-thread shared access.
+    ///
+    /// This method locks the per-thread lock over the state, and then locks
+    /// the cross-process lock over the store. It returns an RAII guard
+    /// which will drop the read access to the state and to the store when
+    /// dropped.
+    ///
+    /// If the cross-process lock over the store is dirty (see
+    /// [`EventCacheStoreLockState`]), the state is reloaded.
+    pub async fn read<'state, 'selector, Selector>(
+        &'state self,
+        cache_state_selector: &'selector Selector,
+    ) -> Result<StateLockReadGuard<'state, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        Selector::Item: 'state,
+        EventCacheError: From<&'selector Selector>,
+    {
+        // Only one call at a time to `read` is allowed.
+        //
+        // Why? Because in case the cross-process lock over the store is dirty, we need
+        // to upgrade the read lock over the state to a write lock.
+        //
+        // ## Upgradable read lock
+        //
+        // One may argue that this upgrades can be done with an _upgradable read lock_
+        // [^1] [^2]. We don't want to use this solution: an upgradable read lock is
+        // basically a mutex because we are losing the shared access property, i.e.
+        // having multiple read locks at the same time. This is an important property to
+        // hold for performance concerns.
+        //
+        // ## Downgradable write lock
+        //
+        // One may also argue we could first obtain a write lock over the state from the
+        // beginning, thus removing the need to upgrade the read lock to a write lock.
+        // The write lock is then downgraded to a read lock once the dirty is cleaned
+        // up. It can potentially create a deadlock in the following situation:
+        //
+        // - `read` is called once, it takes a write lock, then downgrades it to a read
+        //   lock: the guard is kept alive somewhere,
+        // - `read` is called again, and waits to obtain the write lock, which is
+        //   impossible as long as the guard from the previous call is not dropped.
+        //
+        // ## “Atomic” read and write
+        //
+        // One may finally argue to first obtain a read lock over the state, then drop
+        // it if the cross-process lock over the store is dirty, and immediately obtain
+        // a write lock (which can later be downgraded to a read lock). The problem is
+        // that this write lock is async: anything can happen between the drop and the
+        // new lock acquisition, and it's not possible to pause the runtime in the
+        // meantime.
+        //
+        // ## Semaphore with 1 permit, aka a Mutex
+        //
+        // The chosen idea is to allow only one execution at a time of this method: it
+        // becomes a critical section. That way we are free to “upgrade” the read lock
+        // by dropping it and obtaining a new write lock. All callers to this method are
+        // waiting, so nothing can happen in the meantime.
+        //
+        // Note that it doesn't conflict with the `write` method because this latter
+        // immediately obtains a write lock, which avoids any conflict with this method.
+        //
+        // [^1]: https://docs.rs/lock_api/0.4.14/lock_api/struct.RwLock.html#method.upgradable_read
+        // [^2]: https://docs.rs/async-lock/3.4.1/async_lock/struct.RwLock.html#method.upgradable_read
+        let _state_lock_upgrade_guard = self.inner.state_lock_upgrade_mutex.lock().await;
+
+        // Obtain a read lock.
+        let state_guard = self.inner.locked_state.read().await;
+
+        match state_guard.store.lock().await? {
+            EventCacheStoreLockState::Clean(store_guard) => {
+                StateLockReadGuard { state: state_guard, store: store_guard }
+                    .try_map_into_cache_state(cache_state_selector)
+            }
+            EventCacheStoreLockState::Dirty(store_guard) => {
+                // Drop the read lock, and take a write lock to modify the state.
+                // This is safe because only one reader at a time (see
+                // `Self::state_lock_upgrade_mutex`) is allowed.
+                drop(state_guard);
+
+                let mut guard = ReloadableStateLockWriteGuard {
+                    state: self.inner.locked_state.write().await,
+                    store: store_guard,
+                };
+
+                // Reload the state.
+                guard.reload().await?;
+
+                // All good now, mark the cross-process lock as non-dirty.
+                EventCacheStoreLockGuard::clear_dirty(&guard.store);
+
+                // Downgrade the write guard to a read guard, and map it into a cache state.
+                guard.downgrade().try_map_into_cache_state(cache_state_selector)
+            }
+        }
+    }
+
+    /// Lock this [`StateLock`] with exclusive per-thread write access.
+    ///
+    /// This method locks the per-thread lock over the state, and then locks
+    /// the cross-process lock over the store. It returns an RAII guard
+    /// which will drop the write access to the state and to the store when
+    /// dropped.
+    ///
+    /// If the cross-process lock over the store is dirty (see
+    /// [`EventCacheStoreLockState`]), the state is reloaded.
+    pub async fn write<'state, 'selector, Selector>(
+        &'state self,
+        cache_state_selector: &'selector Selector,
+    ) -> Result<StateLockWriteGuard<'state, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        Selector::Item: 'state,
+        EventCacheError: From<&'selector Selector>,
+    {
+        let state_guard = self.inner.locked_state.write().await;
+
+        match state_guard.store.lock().await? {
+            EventCacheStoreLockState::Clean(store_guard) => {
+                ReloadableStateLockWriteGuard { state: state_guard, store: store_guard }
+                    .try_map_into_cache_state(cache_state_selector)
+            }
+            EventCacheStoreLockState::Dirty(store_guard) => {
+                let mut guard =
+                    ReloadableStateLockWriteGuard { state: state_guard, store: store_guard };
+
+                // Reload the state.
+                guard.reload().await?;
+
+                // All good now, mark the cross-process lock as non-dirty.
+                EventCacheStoreLockGuard::clear_dirty(&guard.store);
+
+                guard.try_map_into_cache_state(cache_state_selector)
+            }
+        }
+    }
+}
+
+/// The read lock guard returned by [`StateLock::read`].
+pub struct StateLockReadGuard<'state, S> {
+    /// The per-thread read lock guard over the state `S`.
+    pub state: RwLockReadGuard<'state, S>,
+
+    /// The cross-process lock guard over the store.
+    pub store: EventCacheStoreLockGuard,
+}
+
+impl<'state> StateLockReadGuard<'state, State> {
+    /// Try to map this read lock guard over a [`State`] to over a
+    /// [`CacheStateSelector::CacheState`].
+    ///
+    /// In other words, it returns a subset of the state, selected by
+    /// `cache_state_selector`.
+    fn try_map_into_cache_state<'selector, Selector>(
+        self,
+        cache_state_selector: &'selector Selector,
+    ) -> Result<StateLockReadGuard<'state, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        EventCacheError: From<&'selector Selector>,
+    {
+        Ok(StateLockReadGuard {
+            state: RwLockReadGuard::try_map(self.state, |state| cache_state_selector.select(state))
+                .map_err(|_| EventCacheError::from(cache_state_selector))?,
+            store: self.store,
+        })
+    }
+}
+
+impl<'state, S> Deref for StateLockReadGuard<'state, S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+/// Private type to hold a “reloadable” write lock guard around the state and
+/// the store.
+///
+/// This type aims at being trensient: either it maps to a
+/// [`StateLockReadGuard`] with [`Self::downgrade`], or it maps to a
+/// [`StateLockWriteGuard`] with [`Self::try_map_into_cache_state`]. Its main
+/// goal remains to provide the [`Self::reload`] method to reload all the state
+/// of the Event Cache.
+struct ReloadableStateLockWriteGuard<'state> {
+    state: RwLockWriteGuard<'state, State>,
+    store: EventCacheStoreLockGuard,
+}
+
+impl<'state> ReloadableStateLockWriteGuard<'state> {
+    /// Try to map this write lock guard over a [`State`] to over a
+    /// [`CacheStateSelector::CacheState`].
+    ///
+    /// In other words, it returns a subset of the state, selected by
+    /// `cache_state_selector`.
+    fn try_map_into_cache_state<'selector, Selector>(
+        self,
+        cache_state_selector: &'selector Selector,
+    ) -> Result<StateLockWriteGuard<'state, Selector::Item>>
+    where
+        Selector: selectors::CacheState,
+        EventCacheError: From<&'selector Selector>,
+    {
+        Ok(StateLockWriteGuard {
+            state: RwLockWriteGuard::try_map(self.state, |state| {
+                cache_state_selector.select_mut(state)
+            })
+            .map_err(|_| EventCacheError::from(cache_state_selector))?,
+            store: self.store,
+        })
+    }
+
+    /// Synchronously downgrades a write lock into a read lock.
+    ///
+    /// The per-thread/state lock is downgraded atomically, without allowing
+    /// any writers to take exclusive access of the lock in the meantime.
+    ///
+    /// It returns an RAII guard which will drop the read access to the
+    /// state and to the store when dropped.
+    fn downgrade(self) -> StateLockReadGuard<'state, State> {
+        StateLockReadGuard { state: self.state.downgrade(), store: self.store }
+    }
+
+    async fn reload(&mut self) -> Result<()> {
+        todo!()
+    }
+}
+
+/// The write lock guard return by [`StateLock::write`].
+pub struct StateLockWriteGuard<'state, S> {
+    /// The per-thread write lock guard over the state `S`.
+    pub state: RwLockMappedWriteGuard<'state, S>,
+
+    /// The cross-process lock guard over the store.
+    pub store: EventCacheStoreLockGuard,
+}
+
+impl<'state, S> Deref for StateLockWriteGuard<'state, S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl<'state, S> DerefMut for StateLockWriteGuard<'state, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}

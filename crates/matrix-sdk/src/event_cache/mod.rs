@@ -62,6 +62,7 @@ mod deduplicator;
 mod persistence;
 #[cfg(feature = "e2e-encryption")]
 mod redecryptor;
+mod states;
 mod tasks;
 
 use self::caches::{CachesForRoom, room::RoomEventCacheLinkedChunkUpdate};
@@ -94,7 +95,24 @@ pub enum EventCacheError {
     /// Room is not found.
     #[error("Room `{room_id}` is not found.")]
     RoomNotFound {
-        /// The ID of the room not being found.
+        /// The room ID.
+        room_id: OwnedRoomId,
+    },
+
+    /// Thread is not found.
+    #[error("Thread `{thread_id}` of room `{room_id}` is not found.")]
+    ThreadNotFound {
+        /// The room ID of the thread.
+        room_id: OwnedRoomId,
+
+        /// The thread root event ID.
+        thread_id: ruma::OwnedEventId,
+    },
+
+    /// Pinned-events are not found.
+    #[error("Pinned-events for room `{room_id}` are not found.")]
+    PinnedEventsNotFound {
+        /// The room ID of the pinned-events.
         room_id: OwnedRoomId,
     },
 
