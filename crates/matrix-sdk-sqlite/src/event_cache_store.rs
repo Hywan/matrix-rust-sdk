@@ -124,6 +124,19 @@ impl Encryption {
     fn encode_linked_chunk(&self, table_name: &str, linked_chunk_id: &LinkedChunkId<'_>) -> Key {
         self.encode_key(table_name, linked_chunk_id.storage_key())
     }
+
+    /// Encode a thread ID (which is an [`EventId`]).
+    fn encode_thread_id(&self, thread_id: &EventId) -> Result<Vec<u8>> {
+        self.encode_value(String::from(thread_id.as_str()))
+    }
+
+    /// Decode a thread ID (which is an [`EventId`]).
+    fn decode_thread_id(&self, encoded_thread_id: &[u8]) -> Result<OwnedEventId> {
+        let as_slice = self.decode_value(encoded_thread_id)?;
+        let as_str = str::from_utf8(as_slice.as_ref())?;
+
+        Ok(EventId::parse(as_str)?)
+    }
 }
 
 impl EncryptableStore for Encryption {
@@ -1348,6 +1361,29 @@ impl EventCacheStore for SqliteEventCacheStore {
             .await
     }
 
+    async fn remember_thread(
+        &self,
+        room_id: &RoomId,
+        thread_id: &EventId,
+    ) -> Result<(), Self::Error> {
+        let hashed_linked_chunk_id =
+            self.encryption.encode_linked_chunk(&LinkedChunkId::Thread(room_id, thread_id));
+        let hashed_room_id = self.encryption.encode_room_id(&room_id);
+        let hashed_thread_id = self.encryption.encode_thread_id(&thread_id)?;
+
+        self.write()
+            .await?
+            .with_transaction(move |txn| {
+                txn.execute(
+                    "INSERT OR IGNORE INTO threads VALUES (?, ?, ?)",
+                    (hashed_linked_chunk_id, hashed_room_id, hashed_thread_id),
+                )?;
+
+                Ok(())
+            })
+            .await
+    }
+
     #[instrument(skip(self))]
     async fn clear_all_events(&self) -> Result<(), Self::Error> {
         let _timer = timer!("method");
@@ -1860,6 +1896,7 @@ mod tests {
         linked_chunk::{ChunkIdentifier, LinkedChunkId, Update},
     };
     use matrix_sdk_test::{DEFAULT_TEST_ROOM_ID, async_test};
+    use ruma::{OwnedEventId, event_id};
     use tempfile::{TempDir, tempdir};
 
     use super::{SqliteEventCacheStore, keys};
@@ -1883,6 +1920,18 @@ mod tests {
 
     event_cache_store_integration_tests!();
     event_cache_store_integration_tests_time!();
+
+    #[async_test]
+    async fn test_encryption_encode_decode_thread_id_roundtrip() {
+        let store = get_event_cache_store().await.expect("creating cache store failed");
+        let thread_id: OwnedEventId = event_id!("$event").to_owned();
+
+        let encoded_thread_id = store.encryption.encode_thread_id(&thread_id).unwrap();
+        let decoded_thread_id: OwnedEventId =
+            store.encryption.decode_thread_id(&encoded_thread_id).unwrap();
+
+        assert_eq!(thread_id, decoded_thread_id);
+    }
 
     #[async_test]
     async fn test_pool_size() {
