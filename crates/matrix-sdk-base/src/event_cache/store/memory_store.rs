@@ -167,7 +167,14 @@ impl EventCacheStore for MemoryStore {
         room_id: &RoomId,
         thread_id: &EventId,
     ) -> Result<(), Self::Error> {
-        self.inner.write().unwrap().threads.push((room_id.to_owned(), thread_id.to_owned()));
+        let mut inner = self.inner.write().unwrap();
+        let threads = &mut inner.threads;
+
+        let pair = (room_id.to_owned(), thread_id.to_owned());
+
+        if !threads.contains(&pair) {
+            threads.push(pair);
+        }
 
         Ok(())
     }
