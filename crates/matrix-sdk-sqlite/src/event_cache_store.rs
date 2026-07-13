@@ -617,6 +617,15 @@ async fn run_migrations(conn: &SqliteAsyncConn, version: u8) -> Result<()> {
         .await?;
     }
 
+    if version < 16 {
+        debug!("Upgrading database to version 16");
+        conn.with_transaction(|txn| {
+            txn.execute_batch(include_str!("../migrations/event_cache_store/016_threads.sql"))?;
+            txn.set_db_version(16)
+        })
+        .await?;
+    }
+
     Ok(())
 }
 
