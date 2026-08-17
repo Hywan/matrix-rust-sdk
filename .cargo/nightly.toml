@@ -1,0 +1,19 @@
+include = ["defaults.toml"]
+
+[unstable]
+codegen-backend = true
+feature-unification = true
+gc = true
+unstable-options = true
+
+[build]
+rustflags = ["-Z", "threads=8"]
+
+[profile.dev]
+codegen-backend = "cranelift"
+
+[profile.dev.package.rustls]
+codegen-backend = "llvm"
+
+[resolver]
+feature-unification = "workspace"

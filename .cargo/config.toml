@@ -1,16 +1,1 @@
-[alias]
-xtask = "run --package xtask --"
-uniffi-bindgen = "run --package uniffi-bindgen --"
-
-[doc.extern-map.registries]
-crates-io = "https://docs.rs/"
-
-[unstable]
-rustdoc-map = true
-
-[target.aarch64-linux-android]
-# These rust flags improve the performance on Android on arm64
-rustflags = ["-C", "target-feature=+neon,+aes,+sha2,+pmuv3"]
-
-[env]
-IPHONEOS_DEPLOYMENT_TARGET = "16.0"
+nightly.toml
