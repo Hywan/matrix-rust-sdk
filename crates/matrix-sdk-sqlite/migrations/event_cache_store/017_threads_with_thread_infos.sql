@@ -31,7 +31,7 @@ CREATE TABLE "threads" (
 
     -- The encoded `ThreadInfo`.
     --
-    -- This value can be decodedd.
+    -- This value can be decoded.
     info BLOB NOT NULL,
 
     -- The unique values are `linked_chunk_id` and `event_id` (`room_id`
