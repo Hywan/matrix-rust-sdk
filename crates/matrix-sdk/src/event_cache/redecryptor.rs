@@ -1436,6 +1436,13 @@ mod tests {
             self.memory_store.update_thread_info(room_id, thread_id, thread_info).await
         }
 
+        async fn load_all_thread_infos_for_room(
+            &self,
+            room_id: &RoomId,
+        ) -> Result<Vec<ThreadInfo>, Self::Error> {
+            self.memory_store.load_all_thread_infos_for_room(room_id).await
+        }
+
         async fn clear_all_events(&self, room_id: Option<&RoomId>) -> Result<(), Self::Error> {
             self.memory_store.clear_all_events(room_id).await
         }

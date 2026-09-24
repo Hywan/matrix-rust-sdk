@@ -126,6 +126,12 @@ pub trait EventCacheStore: AsyncTraitDeps {
         thread_info: &ThreadInfo,
     ) -> Result<(), Self::Error>;
 
+    /// Load all [`ThreadInfo`]s for the given `room_id`.
+    async fn load_all_thread_infos_for_room(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ThreadInfo>, Self::Error>;
+
     /// Clear persisted events for all the rooms if `room_id` is `None`, or a
     /// single room otherwise.
     ///
@@ -306,6 +312,13 @@ impl<T: EventCacheStore> EventCacheStore for EraseEventCacheStoreError<T> {
         thread_info: &ThreadInfo,
     ) -> Result<(), Self::Error> {
         self.0.update_thread_info(room_id, thread_id, thread_info).await.map_err(Into::into)
+    }
+
+    async fn load_all_thread_infos_for_room(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ThreadInfo>, Self::Error> {
+        self.0.load_all_thread_infos_for_room(room_id).await.map_err(Into::into)
     }
 
     async fn clear_all_events(&self, room_id: Option<&RoomId>) -> Result<(), Self::Error> {

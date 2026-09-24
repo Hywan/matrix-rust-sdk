@@ -262,6 +262,9 @@ pub trait EventCacheStoreIntegrationTests {
     /// Test that loading and updating a `ThreadInfo` acts as expected.
     async fn test_load_and_update_thread_info(&self);
 
+    /// Test that loading all `ThreadInfo`s of a room acts as expected.
+    async fn test_load_all_thread_infos_in_room(&self);
+
     /// Test that clearing all the rooms' events and linked chunks work.
     async fn test_clear_all_events(&self);
 
@@ -1695,6 +1698,71 @@ impl EventCacheStoreIntegrationTests for DynEventCacheStore {
         assert!(pending.is_empty());
     }
 
+    async fn test_load_all_thread_infos_in_room(&self) {
+        let room_id_0 = room_id!("!r0");
+        let room_id_1 = room_id!("!r1");
+        let room_id_2 = room_id!("!r2");
+        let thread_id_0_0 = event_id!("$t0_0");
+        let thread_id_0_1 = event_id!("$t0_1");
+        let thread_id_0_2 = event_id!("$t0_2");
+        let thread_id_1_0 = event_id!("$t1_0");
+        let thread_id_1_1 = event_id!("$t1_1");
+
+        // Prelude.
+        for (room_nth, (room_id, thread_ids)) in [
+            (room_id_0, [thread_id_0_0, thread_id_0_1, thread_id_0_2].as_slice()),
+            (room_id_1, [thread_id_1_0, thread_id_1_1].as_slice()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (thread_nth, thread_id) in thread_ids.into_iter().enumerate() {
+                let mut thread_info =
+                    self.load_thread_info(room_id, thread_id, true).await.unwrap().unwrap();
+                // Store some values here and there, uniquely distributed.
+                thread_info.number_of_replies = room_nth as u32;
+                thread_info.read_receipts.num_unread = thread_nth as u64;
+
+                self.update_thread_info(room_id, thread_id, &thread_info).await.unwrap();
+            }
+        }
+
+        // Test `ThreadInfo`s are correctly returned.
+
+        // For `room_id_0`.
+        let mut all_threads_for_room_0 =
+            self.load_all_thread_infos_for_room(room_id_0).await.unwrap();
+
+        // Sort for testing purposes.
+        all_threads_for_room_0
+            .sort_unstable_by(|t, u| t.read_receipts.num_unread.cmp(&u.read_receipts.num_unread));
+
+        assert_eq!(all_threads_for_room_0.len(), 3);
+
+        for (thread_nth, thread_info) in all_threads_for_room_0.into_iter().enumerate() {
+            assert_eq!(thread_info.number_of_replies, 0);
+            assert_eq!(thread_info.read_receipts.num_unread, thread_nth as u64);
+        }
+
+        // For `room_id_1`.
+        let mut all_threads_for_room_1 =
+            self.load_all_thread_infos_for_room(room_id_1).await.unwrap();
+
+        // Sort for testing purposes.
+        all_threads_for_room_1
+            .sort_unstable_by(|t, u| t.read_receipts.num_unread.cmp(&u.read_receipts.num_unread));
+
+        assert_eq!(all_threads_for_room_1.len(), 2);
+
+        for (thread_nth, thread_info) in all_threads_for_room_1.into_iter().enumerate() {
+            assert_eq!(thread_info.number_of_replies, 1);
+            assert_eq!(thread_info.read_receipts.num_unread, thread_nth as u64);
+        }
+
+        // For `room_id_2`.
+        assert!(self.load_all_thread_infos_for_room(room_id_2).await.unwrap().is_empty());
+    }
+
     async fn test_clear_all_events(&self) {
         let linked_chunk_ids = [
             LinkedChunkId::Room(room_id!("!r0")),
@@ -2930,6 +2998,13 @@ macro_rules! event_cache_store_integration_tests {
                 let event_cache_store =
                     get_event_cache_store().await.unwrap().into_event_cache_store();
                 event_cache_store.test_load_and_update_thread_info().await;
+            }
+
+            #[async_test]
+            async fn test_load_all_thread_infos_in_room() {
+                let event_cache_store =
+                    get_event_cache_store().await.unwrap().into_event_cache_store();
+                event_cache_store.test_load_all_thread_infos_in_room().await;
             }
 
             #[async_test]

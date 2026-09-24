@@ -1497,6 +1497,26 @@ impl EventCacheStore for SqliteEventCacheStore {
             .await
     }
 
+    async fn load_all_thread_infos_for_room(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ThreadInfo>, Self::Error> {
+        let hashed_room_id = self.encryption.encode_room_id(keys::EVENTS, room_id);
+        let encryption = self.encryption.clone();
+
+        self.read()
+            .await?
+            .with_transaction(move |txn| {
+                txn.prepare("SELECT info FROM threads WHERE room_id = ?")?
+                    .query_map((hashed_room_id,), |row| row.get::<_, Vec<u8>>(0))?
+                    .map(|encoded_thread_info| {
+                        encryption.decode_thread_info(encoded_thread_info?.as_slice())
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .await
+    }
+
     #[instrument(skip(self))]
     async fn clear_all_events(&self, room_id: Option<&RoomId>) -> Result<(), Self::Error> {
         let _timer = timer!("method");

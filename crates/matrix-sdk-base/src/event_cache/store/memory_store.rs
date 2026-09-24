@@ -233,6 +233,22 @@ impl EventCacheStore for MemoryStore {
         Ok(())
     }
 
+    async fn load_all_thread_infos_for_room(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<ThreadInfo>, Self::Error> {
+        let inner = self.inner.read().unwrap();
+
+        Ok(inner
+            .threads
+            .iter()
+            .filter_map(|((key_room_id, _key_thread_id), thread_info)| {
+                (room_id == key_room_id).then_some(thread_info)
+            })
+            .cloned()
+            .collect())
+    }
+
     async fn clear_all_events(&self, room_id: Option<&RoomId>) -> Result<(), Self::Error> {
         match room_id {
             Some(room_id) => {

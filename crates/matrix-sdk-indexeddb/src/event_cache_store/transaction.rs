@@ -647,10 +647,6 @@ impl<'a> IndexeddbEventCacheStoreTransaction<'a> {
         &self,
         room_id: &RoomId,
     ) -> Result<Vec<Thread>, TransactionError> {
-        self.get_items_by_key::<Thread, IndexedThreadIdKey>(IndexedKeyRange::all_with_prefix(
-            room_id,
-            self.serializer().inner(),
-        ))
-        .await
+        self.get_items_in_room::<Thread, IndexedThreadIdKey>(room_id).await
     }
 }
