@@ -131,7 +131,6 @@ impl Encryption {
     }
 
     /// Decode a thread ID (which is an [`EventId`]).
-    #[cfg(test)]
     fn decode_thread_id(&self, encoded_thread_id: &[u8]) -> Result<OwnedEventId> {
         let as_slice = self.decode_value(encoded_thread_id)?;
         let as_str = str::from_utf8(as_slice.as_ref())?;
@@ -1494,6 +1493,33 @@ impl EventCacheStore for SqliteEventCacheStore {
                 )?;
 
                 Ok(())
+            })
+            .await
+    }
+
+    async fn load_all_thread_infos_for_room(
+        &self,
+        room_id: &RoomId,
+    ) -> Result<Vec<(OwnedEventId, ThreadInfo)>, Self::Error> {
+        let hashed_room_id = self.encryption.encode_room_id(keys::EVENTS, room_id);
+        let encryption = self.encryption.clone();
+
+        self.read()
+            .await?
+            .with_transaction(move |txn| {
+                txn.prepare("SELECT event_id, info FROM threads WHERE room_id = ?")?
+                    .query_map((hashed_room_id,), |row| {
+                        Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                    })?
+                    .map(|encoded_values| {
+                        let (encoded_thread_id, encoded_thread_info) = encoded_values?;
+
+                        Ok((
+                            encryption.decode_thread_id(encoded_thread_id.as_slice())?,
+                            encryption.decode_thread_info(encoded_thread_info.as_slice())?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>>>()
             })
             .await
     }
