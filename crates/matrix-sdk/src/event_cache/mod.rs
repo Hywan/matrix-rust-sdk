@@ -519,7 +519,7 @@ impl EventCache {
 
         let all_threads = store.load_all_thread_infos_for_room(room_id).await?;
 
-        Ok(ThreadList::new(all_threads))
+        Ok(ThreadList::new(self.inner.clone(), all_threads))
     }
 
     /// Forget all caches related to a single room.
