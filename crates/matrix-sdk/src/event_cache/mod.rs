@@ -68,6 +68,7 @@ mod redecryptor;
 mod search_backfill;
 mod states;
 mod tasks;
+mod thread_list;
 
 #[cfg(feature = "e2e-encryption")]
 pub use redecryptor::{DecryptionRetryRequest, RedecryptorReport};
@@ -87,6 +88,7 @@ pub use self::{
         thread::{ThreadEventCache, ThreadEventCacheUpdate, pagination::ThreadPagination},
     },
     search_backfill::SearchBackfillStrategy,
+    thread_list::{ThreadList, ThreadListItem},
 };
 use self::{
     caches::{Caches, room::RoomEventCacheLinkedChunkUpdate, subscriber::AutoShrinkMessage},
@@ -518,6 +520,28 @@ impl EventCache {
         };
 
         Ok(store.load_thread_info(room_id, thread_id, false).await?)
+    }
+
+    /// Get a list of all threads for room represented by `room_id`.
+    ///
+    /// The list is fed by the data known in the [`EventCache`] itself, and
+    /// completed by the homeserver.
+    pub async fn thread_list(&self, room_id: &RoomId) -> Result<ThreadList> {
+        let Some(client) = self.inner.client.get() else {
+            return Err(EventCacheError::ClientDropped);
+        };
+
+        // We can go directly on the store. I don't think we need to go through
+        // the `State`, as the data cannot be outdated/dirty: the store
+        // is the source of truth.
+        let store = match client.event_cache_store().lock().await? {
+            MappedCrossProcessLockState::Clean(store)
+            | MappedCrossProcessLockState::Dirty(store) => store,
+        };
+
+        let all_threads = store.load_all_thread_infos_for_room(room_id).await?;
+
+        Ok(ThreadList::new(all_threads))
     }
 
     /// Forget all caches related to a single room.
