@@ -484,7 +484,7 @@ impl EventCache {
         thread_id: &EventId,
     ) -> Result<Option<ThreadInfo>> {
         let Some(client) = self.inner.client.get() else {
-            return Ok(None);
+            return Err(EventCacheError::ClientDropped);
         };
 
         // We can go directly on the store. I don't think we need to go throw the
