@@ -125,13 +125,13 @@ impl RoomEventCacheLinkedChunkUpdate {
 #[derive(Clone)]
 pub struct RoomEventCacheUpdateSender {
     room_sender: Sender<RoomEventCacheUpdate>,
-    generic_sender: Sender<RoomEventCacheGenericUpdate>,
+    room_generic_sender: Sender<RoomEventCacheGenericUpdate>,
 }
 
 impl RoomEventCacheUpdateSender {
     /// Create a new [`RoomEventCacheUpdateSender`].
-    pub fn new(generic_sender: Sender<RoomEventCacheGenericUpdate>) -> Self {
-        Self { room_sender: Sender::new(32), generic_sender }
+    pub fn new(room_generic_sender: Sender<RoomEventCacheGenericUpdate>) -> Self {
+        Self { room_sender: Sender::new(32), room_generic_sender }
     }
 
     /// Send a [`RoomEventCacheUpdate`] and an optional
@@ -139,18 +139,20 @@ impl RoomEventCacheUpdateSender {
     pub fn send(
         &self,
         room_update: RoomEventCacheUpdate,
-        generic_update: Option<RoomEventCacheGenericUpdate>,
+        room_generic_update: Option<RoomEventCacheGenericUpdate>,
     ) {
         let _ = self.room_sender.send(room_update);
 
-        if let Some(generic_update) = generic_update {
-            let _ = self.generic_sender.send(generic_update);
+        if let Some(room_generic_update) = room_generic_update {
+            let _ = self.room_generic_sender.send(room_generic_update);
         }
     }
 
-    /// Get the generic update sender.
-    pub(in super::super) fn generic_update_sender(&self) -> &Sender<RoomEventCacheGenericUpdate> {
-        &self.generic_sender
+    /// Get the room generic update sender.
+    pub(in super::super) fn room_generic_update_sender(
+        &self,
+    ) -> &Sender<RoomEventCacheGenericUpdate> {
+        &self.room_generic_sender
     }
 
     /// Create a new [`Receiver`] of [`RoomEventCacheUpdate`].

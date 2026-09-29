@@ -103,10 +103,10 @@ impl ThreadEventCache {
         weak_room: WeakRoom,
         state: &StateLock,
         auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
-        generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
+        room_generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
         linked_chunk_update_sender: Sender<RoomEventCacheLinkedChunkUpdate>,
     ) -> Result<Self> {
-        let update_sender = ThreadEventCacheUpdateSender::new(generic_update_sender.clone());
+        let update_sender = ThreadEventCacheUpdateSender::new(room_generic_update_sender.clone());
 
         let cache_state = state
             .try_insert_once_with(
@@ -142,9 +142,9 @@ impl ThreadEventCache {
         };
 
         // If at least one event has been loaded, it means there is a timeline.
-        // Let's emit a generic update.
+        // Let's emit a room generic update.
         if timeline_is_not_empty {
-            let _ = generic_update_sender
+            let _ = room_generic_update_sender
                 .send(RoomEventCacheGenericUpdate { room_id: room_id.to_owned() });
         }
 

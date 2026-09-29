@@ -334,7 +334,7 @@ impl EventCache {
         event_cache_store: EventCacheStoreLock,
         enable_automatic_back_pagination: bool,
     ) -> Self {
-        let (generic_update_sender, _) = channel(128);
+        let (room_generic_update_sender, _) = channel(128);
         let (linked_chunk_update_sender, _) = channel(128);
 
         let weak_client = WeakClient::from_inner(client);
@@ -354,7 +354,7 @@ impl EventCache {
             state: StateLock::new(event_cache_store),
             by_room: Default::default(),
             auto_shrink_sender,
-            generic_update_sender,
+            room_generic_update_sender,
             linked_chunk_update_sender,
             #[cfg(feature = "e2e-encryption")]
             redecryption_channels,
@@ -568,7 +568,7 @@ impl EventCache {
     /// without side-effects, this method is recommended. Also, dropping the
     /// receiver of this channel will not trigger any side-effect.
     pub fn subscribe_to_room_generic_updates(&self) -> Receiver<RoomEventCacheGenericUpdate> {
-        self.inner.generic_update_sender.subscribe()
+        self.inner.room_generic_update_sender.subscribe()
     }
 
     /// Returns the shared [`BackPaginationQueue`], if enabled at construction
@@ -647,11 +647,11 @@ struct EventCacheInner {
     /// See doc comment of [`tasks::auto_shrink_linked_chunk_task`].
     auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
 
-    /// A sender for room generic update.
+    /// A sender for room generic updates.
     ///
     /// See doc comment of [`RoomEventCacheGenericUpdate`] and
     /// [`EventCache::subscribe_to_room_generic_updates`].
-    generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
+    room_generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
 
     /// A sender for a persisted linked chunk update.
     ///
@@ -817,7 +817,7 @@ impl EventCacheInner {
                 let caches = Caches::new(
                     &self.client,
                     room_id,
-                    self.generic_update_sender.clone(),
+                    self.room_generic_update_sender.clone(),
                     self.linked_chunk_update_sender.clone(),
                     self.auto_shrink_sender.clone(),
                     &self.state,
@@ -935,7 +935,7 @@ mod tests {
     }
 
     #[async_test]
-    async fn test_generic_update_when_loading_rooms() {
+    async fn test_room_generic_update_when_loading_rooms() {
         // Create 2 rooms. One of them has data in the event cache storage.
         let user = user_id!("@mnt_io:matrix.org");
 
@@ -1010,7 +1010,7 @@ mod tests {
     }
 
     #[async_test]
-    async fn test_generic_update_when_paginating_room() {
+    async fn test_room_generic_update_when_paginating_room() {
         // Create 1 room, with 4 chunks in the event cache storage.
         let user = user_id!("@mnt_io:matrix.org");
         let room_id = room_id!("!raclette:patate.ch");

@@ -86,7 +86,7 @@ impl Caches {
     pub async fn new(
         weak_client: &WeakClient,
         room_id: &RoomId,
-        generic_update_sender: Sender<room::RoomEventCacheGenericUpdate>,
+        room_generic_update_sender: Sender<room::RoomEventCacheGenericUpdate>,
         linked_chunk_update_sender: Sender<room::RoomEventCacheLinkedChunkUpdate>,
         auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
         state: &states::StateLock,
@@ -110,7 +110,8 @@ impl Caches {
         let enabled_thread_support =
             matches!(client.base_client().threading_support, ThreadingSupport::Enabled { .. });
 
-        let update_sender = room::RoomEventCacheUpdateSender::new(generic_update_sender.clone());
+        let update_sender =
+            room::RoomEventCacheUpdateSender::new(room_generic_update_sender.clone());
 
         let own_user_id =
             client.user_id().expect("the user must be logged in, at this point").to_owned();
@@ -151,7 +152,7 @@ impl Caches {
         // If at least one event has been loaded, it means there is a timeline.
         // Let's emit a generic update.
         if timeline_is_not_empty {
-            let _ = generic_update_sender
+            let _ = room_generic_update_sender
                 .send(room::RoomEventCacheGenericUpdate { room_id: room_id.to_owned() });
         }
 
@@ -210,7 +211,7 @@ impl Caches {
                         room.weak_room().to_owned(),
                         &self.internals.state,
                         self.internals.auto_shrink_sender.clone(),
-                        room.update_sender().generic_update_sender().clone(),
+                        room.update_sender().room_generic_update_sender().clone(),
                         self.internals.linked_chunk_update_sender.clone(),
                     )
                     .await?;

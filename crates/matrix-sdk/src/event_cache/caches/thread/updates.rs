@@ -46,25 +46,25 @@ pub enum ThreadEventCacheUpdate {
 #[derive(Clone)]
 pub struct ThreadEventCacheUpdateSender {
     thread_sender: Sender<ThreadEventCacheUpdate>,
-    generic_sender: Sender<RoomEventCacheGenericUpdate>,
+    room_generic_sender: Sender<RoomEventCacheGenericUpdate>,
 }
 
 impl ThreadEventCacheUpdateSender {
     /// Create a new [`ThreadEventCacheUpdateSender`].
-    pub fn new(generic_sender: Sender<RoomEventCacheGenericUpdate>) -> Self {
-        Self { thread_sender: Sender::new(32), generic_sender }
+    pub fn new(room_generic_sender: Sender<RoomEventCacheGenericUpdate>) -> Self {
+        Self { thread_sender: Sender::new(32), room_generic_sender }
     }
 
     /// Send a [`TimelineVectorDiffs`].
     pub fn send(
         &self,
         thread_update: ThreadEventCacheUpdate,
-        generic_update: Option<RoomEventCacheGenericUpdate>,
+        room_generic_update: Option<RoomEventCacheGenericUpdate>,
     ) {
         let _ = self.thread_sender.send(thread_update);
 
-        if let Some(generic_update) = generic_update {
-            let _ = self.generic_sender.send(generic_update);
+        if let Some(room_generic_update) = room_generic_update {
+            let _ = self.room_generic_sender.send(room_generic_update);
         }
     }
 
