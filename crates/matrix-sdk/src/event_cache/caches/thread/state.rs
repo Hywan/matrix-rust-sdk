@@ -59,7 +59,7 @@ use super::{
         room::RoomEventCacheLinkedChunkUpdate,
         subscriber::SubscribersHandle,
     },
-    ThreadEventCacheUpdateSender,
+    ThreadEventCacheUpdateSender, ThreadInfoGenericUpdate,
 };
 #[cfg(feature = "e2e-encryption")]
 use crate::event_cache::redecryptor;
@@ -93,6 +93,14 @@ pub struct ThreadEventCacheState {
     /// This is used only by the [`LockedThreadEventCacheState::read`] and
     /// [`LockedThreadEventCacheState::write`] when the state must be reset.
     pub update_sender: ThreadEventCacheUpdateSender,
+
+    /// Sender to the [`ThreadInfo`] generic update.
+    ///
+    /// See doc comment around
+    /// [`EventCacheInner::thread_info_generic_update_sender`][0].
+    ///
+    /// [0]: super::super::EventCacheInner::thread_info_generic_update_sender
+    thread_info_generic_update_sender: Sender<ThreadInfoGenericUpdate>,
 
     /// A sender for the globally observable linked chunk updates that happened
     /// during a sync or a back-pagination.
@@ -130,6 +138,7 @@ impl ThreadEventCacheState {
         room_version_rules: RoomVersionRules,
         store_guard: EventCacheStoreLockGuard,
         update_sender: ThreadEventCacheUpdateSender,
+        thread_info_generic_update_sender: Sender<ThreadInfoGenericUpdate>,
         linked_chunk_update_sender: Sender<RoomEventCacheLinkedChunkUpdate>,
     ) -> Result<Self> {
         let linked_chunk_id = LinkedChunkId::Thread(&room_id, &thread_id);
@@ -197,6 +206,7 @@ impl ThreadEventCacheState {
             ),
             thread_info: SharedObservable::new_async(thread_info),
             update_sender,
+            thread_info_generic_update_sender,
             linked_chunk_update_sender,
             waited_for_initial_prev_token: false,
             subscribers_handle: SubscribersHandle::default(),
@@ -635,6 +645,16 @@ impl<'a> StateLockWriteGuard<'a, ThreadEventCacheState> {
         let mut thread_info = self.state.thread_info.write().await;
 
         ObservableWriteGuard::update(&mut thread_info, update);
+
+        let _ = self.thread_info_generic_update_sender.send(ThreadInfoGenericUpdate {
+            room_id: self.state.room_id.to_owned(),
+            thread_id: self.state.thread_id.to_owned(),
+            number_of_replies: thread_info.number_of_replies,
+            latest_event: thread_info.latest_event.clone(),
+            num_unread: thread_info.read_receipts.num_unread,
+            num_notifications: thread_info.read_receipts.num_notifications,
+            num_mentions: thread_info.read_receipts.num_mentions,
+        });
 
         Ok(self
             .store

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use matrix_sdk_base::deserialized_responses::ThreadSummary;
-use ruma::events::receipt::ReceiptEventContent;
+use ruma::{OwnedEventId, OwnedRoomId, events::receipt::ReceiptEventContent};
 use tokio::sync::broadcast::{Receiver, Sender};
 
 use super::super::{super::RoomEventCacheGenericUpdate, TimelineVectorDiffs};
@@ -40,6 +40,52 @@ pub enum ThreadEventCacheUpdate {
         /// The event containing the receipts.
         event: ReceiptEventContent,
     },
+}
+
+/// Represents a [`ThreadInfo`]-ish update of a thread.
+///
+/// This is used by [`EventCache::subscribe_to_thread_info_generic_updates`][0].
+/// Please read it to learn more about the motivation behind this type.
+///
+/// [0]: super::super::super::EventCache::subscribe_to_thread_info_generic_updates
+#[derive(Clone, Debug)]
+pub struct ThreadInfoGenericUpdate {
+    /// The room ID owning the timeline.
+    pub room_id: OwnedRoomId,
+
+    /// The thread I being updated.
+    pub thread_id: OwnedEventId,
+
+    // The following are copied from `ThreadInfo`. Why? To reduce the size of this struct. Also, if
+    // new fields are added in the future to `ThreadInfo`, it won't increase the size of this type.
+    // Finally, some fields in `ThreadInfo`, like `read_receipts` contains data that should not be
+    // shared, like `ReadReceipts::latest_active` or `ReadReceipts::pending`.
+
+    //
+    /// Copied from [`ThreadInfo::number_of_replies`][0].
+    ///
+    /// [0]: matrix_sdk_base::event_cache::thread::ThreadInfo::number_of_replies
+    pub number_of_replies: u32,
+
+    /// Copied from [`ThreadInfo::latest_event`][0].
+    ///
+    /// [0]: matrix_sdk_base::event_cache::thread::ThreadInfo::latest_event
+    pub latest_event: Option<OwnedEventId>,
+
+    /// Copied from [`ThreadInfo::read_receipts::num_unread`][0].
+    ///
+    /// [0]: matrix_sdk_base::read_receipts::ReadReceipts::num_unread
+    pub num_unread: u64,
+
+    /// Copied from [`ThreadInfo::read_receipts::num_notifications`][0].
+    ///
+    /// [0]: matrix_sdk_base::read_receipts::ReadReceipts::num_notifications
+    pub num_notifications: u64,
+
+    /// Copied from [`ThreadInfo::read_receipts::num_mentions`][0].
+    ///
+    /// [0]: matrix_sdk_base::read_receipts::ReadReceipts::num_mentions
+    pub num_mentions: u64,
 }
 
 /// A small type to send updates in all channels.

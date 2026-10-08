@@ -77,6 +77,7 @@ pub(super) struct Caches {
 struct CachesInternals {
     state: states::StateLock,
     auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
+    thread_info_generic_update_sender: Sender<thread::ThreadInfoGenericUpdate>,
     linked_chunk_update_sender: Sender<room::RoomEventCacheLinkedChunkUpdate>,
     room_version_rules: RoomVersionRules,
 }
@@ -87,6 +88,7 @@ impl Caches {
         weak_client: &WeakClient,
         room_id: &RoomId,
         room_generic_update_sender: Sender<room::RoomEventCacheGenericUpdate>,
+        thread_info_generic_update_sender: Sender<thread::ThreadInfoGenericUpdate>,
         linked_chunk_update_sender: Sender<room::RoomEventCacheLinkedChunkUpdate>,
         auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
         state: &states::StateLock,
@@ -164,6 +166,7 @@ impl Caches {
             internals: CachesInternals {
                 state: state.clone(),
                 auto_shrink_sender,
+                thread_info_generic_update_sender,
                 linked_chunk_update_sender,
                 room_version_rules,
             },
@@ -212,6 +215,7 @@ impl Caches {
                         &self.internals.state,
                         self.internals.auto_shrink_sender.clone(),
                         room.update_sender().room_generic_update_sender().clone(),
+                        self.internals.thread_info_generic_update_sender.clone(),
                         self.internals.linked_chunk_update_sender.clone(),
                     )
                     .await?;

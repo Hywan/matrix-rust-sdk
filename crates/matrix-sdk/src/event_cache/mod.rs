@@ -56,6 +56,7 @@ use tracing::{error, instrument, trace};
 use crate::{
     Client,
     client::{ClientInner, WeakClient},
+    event_cache::caches::thread::ThreadInfoGenericUpdate,
     paginators::PaginatorError,
 };
 
@@ -335,6 +336,7 @@ impl EventCache {
         enable_automatic_back_pagination: bool,
     ) -> Self {
         let (room_generic_update_sender, _) = channel(128);
+        let (thread_info_generic_update_sender, _) = channel(128);
         let (linked_chunk_update_sender, _) = channel(128);
 
         let weak_client = WeakClient::from_inner(client);
@@ -355,6 +357,7 @@ impl EventCache {
             by_room: Default::default(),
             auto_shrink_sender,
             room_generic_update_sender,
+            thread_info_generic_update_sender,
             linked_chunk_update_sender,
             #[cfg(feature = "e2e-encryption")]
             redecryption_channels,
@@ -571,6 +574,21 @@ impl EventCache {
         self.inner.room_generic_update_sender.subscribe()
     }
 
+    /// Subscribe to [`ThreadInfo`]-ish _generic_ updates.
+    ///
+    /// If one want to listen the `ThreadInfo` in a specific thread for example,
+    /// the [`ThreadEventCache::subscribe_to_thread_info`] method is
+    /// recommended. However, if one is interested by the `ThreadInfo` of _all_
+    /// threads, it's not practical to open all `ThreadEventCache`. Instead,
+    /// this method can be used for that.
+    ///
+    /// [`ThreadInfoGenericUpdate`] doesn't contain a full `ThreadInfo` because
+    /// it would be too much information. Instead, it only provides (what we
+    /// consider) relevant public data.
+    pub fn subscribe_to_thread_info_generic_updates(&self) -> Receiver<ThreadInfoGenericUpdate> {
+        self.inner.thread_info_generic_update_sender.subscribe()
+    }
+
     /// Returns the shared [`BackPaginationQueue`], if enabled at construction
     /// with [`ClientBuilder::with_enable_automatic_back_pagination`].
     ///
@@ -652,6 +670,12 @@ struct EventCacheInner {
     /// See doc comment of [`RoomEventCacheGenericUpdate`] and
     /// [`EventCache::subscribe_to_room_generic_updates`].
     room_generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
+
+    /// A sender for thread info generic updates.
+    ///
+    /// See doc comment of [`ThreadInfoGenericUpdate`], and
+    /// [`EventCache::subscribe_to_thread_info_generic_updates`].
+    thread_info_generic_update_sender: Sender<ThreadInfoGenericUpdate>,
 
     /// A sender for a persisted linked chunk update.
     ///
@@ -818,6 +842,7 @@ impl EventCacheInner {
                     &self.client,
                     room_id,
                     self.room_generic_update_sender.clone(),
+                    self.thread_info_generic_update_sender.clone(),
                     self.linked_chunk_update_sender.clone(),
                     self.auto_shrink_sender.clone(),
                     &self.state,

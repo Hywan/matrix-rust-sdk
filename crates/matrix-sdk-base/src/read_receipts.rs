@@ -49,7 +49,7 @@ pub struct ReadReceipts {
     pub num_mentions: u64,
 
     /// The latest read receipt (main-threaded or unthreaded) known for the
-    /// room.
+    /// timeline.
     pub latest_active: Option<LatestReadReceipt>,
 
     /// Read receipts that haven't been matched to their event.

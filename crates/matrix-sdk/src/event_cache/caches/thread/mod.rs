@@ -36,7 +36,10 @@ use tracing::{instrument, trace};
 
 pub(in super::super) use self::state::ThreadEventCacheState;
 pub(super) use self::updates::ThreadEventCacheUpdateSender;
-pub use self::{pagination::ThreadPagination, updates::ThreadEventCacheUpdate};
+pub use self::{
+    pagination::ThreadPagination,
+    updates::{ThreadEventCacheUpdate, ThreadInfoGenericUpdate},
+};
 #[cfg(feature = "e2e-encryption")]
 use super::super::redecryptor::MaybeResolvedEvent;
 use super::{
@@ -78,8 +81,10 @@ struct ThreadEventCacheInner {
 
     /// Sender to the auto-shrink channel.
     ///
-    /// See doc comment around [`EventCache::auto_shrink_linked_chunk_task`] for
-    /// more details.
+    /// See doc comment around [`auto_shrink_linked_chunk_task`][0] for more
+    /// details.
+    ///
+    /// [0]: super::super::tasks::auto_shrink_linked_chunk_task
     auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
 
     /// Update sender for this thread.
@@ -104,6 +109,7 @@ impl ThreadEventCache {
         state: &StateLock,
         auto_shrink_sender: mpsc::Sender<AutoShrinkMessage>,
         room_generic_update_sender: Sender<RoomEventCacheGenericUpdate>,
+        thread_info_generic_update_sender: Sender<ThreadInfoGenericUpdate>,
         linked_chunk_update_sender: Sender<RoomEventCacheLinkedChunkUpdate>,
     ) -> Result<Self> {
         let update_sender = ThreadEventCacheUpdateSender::new(room_generic_update_sender.clone());
@@ -120,6 +126,7 @@ impl ThreadEventCache {
                         room_version_rules,
                         store_guard,
                         update_sender.clone(),
+                        thread_info_generic_update_sender,
                         linked_chunk_update_sender,
                     )
                 },
