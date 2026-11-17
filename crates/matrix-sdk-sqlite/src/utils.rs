@@ -16,13 +16,13 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     cmp::min,
+    future::ready,
     iter,
     ops::Deref,
 };
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use deadpool_sync::InteractError;
 use itertools::Itertools;
 use matrix_sdk_store_encryption::{EncryptableValue, StoreCipher};
 use ruma::{OwnedEventId, OwnedRoomId, serde::Raw, time::SystemTime};
@@ -30,13 +30,14 @@ use rusqlite::{
     OptionalExtension, Params, Row, Statement, Transaction, TransactionBehavior, limits::Limit,
 };
 use serde::{Serialize, de::DeserializeOwned};
+use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard};
 use tracing::{error, trace, warn};
 use vodozemac::base64_encode;
 use zeroize::Zeroize;
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret,
-    connection::Connection as SqliteAsyncConn,
+    connection::{Connection, SqliteConnection},
     error::{Error, Result},
 };
 
@@ -70,7 +71,7 @@ impl rusqlite::ToSql for Key {
 }
 
 #[async_trait]
-pub(crate) trait SqliteAsyncConnExt {
+pub(crate) trait ConnectionExt {
     async fn execute<P>(
         &self,
         sql: impl AsRef<str> + Send + 'static,
@@ -225,8 +226,40 @@ pub(crate) trait SqliteAsyncConnExt {
     }
 }
 
+trait Acquire {
+    type Output<'a>
+    where
+        Self: 'a;
+
+    fn acquire<'a>(&'a self) -> impl Future<Output = Self::Output<'a>> + Send;
+}
+
+/*
+impl<T> Acquire for Mutex<T> {
+    type Output<'a>
+        = MutexGuard<'a, T>
+    where
+        Self: 'a;
+
+    async fn acquire<'a>(&'a self) -> Self::Output<'a> {
+        self.lock().await
+    }
+}
+
+impl<T> Acquire for OwnedMutexGuard<T> {
+    type Output<'a>
+        = &'a OwnedMutexGuard<T>
+    where
+        Self: 'a;
+
+    fn acquire<'a>(&'a self) -> impl Future<Output = Self::Output<'a>> {
+        ready(self)
+    }
+}
+*/
+
 #[async_trait]
-impl SqliteAsyncConnExt for SqliteAsyncConn {
+impl ConnectionExt for OwnedMutexGuard<SqliteConnection> {
     async fn execute<P>(
         &self,
         sql: impl AsRef<str> + Send + 'static,
@@ -235,15 +268,11 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
     where
         P: Params + Send + 'static,
     {
-        self.interact(move |conn| conn.execute(sql.as_ref(), params))
-            .await
-            .map_err(map_interact_err)?
+        self.deref().execute(sql.as_ref(), params)
     }
 
     async fn execute_batch(&self, sql: impl AsRef<str> + Send + 'static) -> rusqlite::Result<()> {
-        self.interact(move |conn| conn.execute_batch(sql.as_ref()))
-            .await
-            .map_err(map_interact_err)?
+        todo!()
     }
 
     async fn prepare<T, F>(
@@ -255,7 +284,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         T: Send + 'static,
         F: FnOnce(Statement<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        self.interact(move |conn| f(conn.prepare(sql.as_ref())?)).await.map_err(map_interact_err)?
+        todo!()
     }
 
     async fn query_row<T, P, F>(
@@ -269,9 +298,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         P: Params + Send + 'static,
         F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        self.interact(move |conn| conn.query_row(sql.as_ref(), params, f))
-            .await
-            .map_err(map_interact_err)?
+        todo!()
     }
 
     async fn query_one<T, P, F>(
@@ -285,9 +312,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         P: Params + Send + 'static,
         F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        self.interact(move |conn| conn.query_one(sql.as_ref(), params, f))
-            .await
-            .map_err(map_interact_err)?
+        todo!()
     }
 
     async fn query_many<T, P, F>(
@@ -301,12 +326,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         P: Params + Send + 'static,
         F: FnMut(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        self.interact(move |conn| {
-            let mut stmt = conn.prepare(sql.as_ref())?;
-            stmt.query_and_then(params, f)?.collect()
-        })
-        .await
-        .map_err(map_interact_err)?
+        todo!()
     }
 
     async fn with_transaction<T, E, F>(&self, f: F) -> Result<T, E>
@@ -315,15 +335,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         E: From<rusqlite::Error> + Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
     {
-        self.interact(move |conn| {
-            let txn = conn.transaction()?;
-            let result = f(&txn)?;
-            txn.commit()?;
-            Ok(result)
-        })
-        .await
-        .map_err(map_interact_err)
-        .map_err(E::from)?
+        todo!()
     }
 
     async fn with_immediate_transaction<T, E, F>(&self, f: F) -> Result<T, E>
@@ -332,31 +344,135 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
         E: From<rusqlite::Error> + Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
     {
-        self.interact(move |conn| -> Result<T, E> {
-            // Start the transaction in IMMEDIATE mode since all updates may
-            // cause writes, to avoid read transactions upgrading to write mode
-            // and causing SQLITE_BUSY errors. See also:
-            // https://www.sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions
-            conn.set_transaction_behavior(TransactionBehavior::Immediate);
+        todo!()
+    }
 
-            let code = || -> Result<T, E> {
-                let txn = conn.transaction()?;
-                let res = f(&txn)?;
-                txn.commit()?;
-                Ok(res)
-            };
+    async fn chunk_large_query_over<Query, Res>(
+        &self,
+        keys_to_chunk: Vec<Key>,
+        result_capacity: Option<usize>,
+        do_query: Query,
+    ) -> Result<Vec<Res>>
+    where
+        Res: Send + 'static,
+        Query: Fn(&Transaction<'_>, ChunkFromLargeQuery<Key>) -> Result<Vec<Res>> + Send + 'static,
+    {
+        todo!()
+    }
+}
 
-            let res = code();
+#[async_trait]
+impl ConnectionExt for Connection {
+    async fn execute<P>(
+        &self,
+        sql: impl AsRef<str> + Send + 'static,
+        params: P,
+    ) -> rusqlite::Result<usize>
+    where
+        P: Params + Send + 'static,
+    {
+        self.lock().await.execute(sql.as_ref(), params)
+    }
 
-            // Reset the transaction behavior to use Deferred, after this
-            // transaction has been run, whether it was successful or not.
-            conn.set_transaction_behavior(TransactionBehavior::Deferred);
+    async fn execute_batch(&self, sql: impl AsRef<str> + Send + 'static) -> rusqlite::Result<()> {
+        self.lock().await.execute_batch(sql.as_ref())
+    }
 
-            res
-        })
-        .await
-        .map_err(map_interact_err)
-        .map_err(E::from)?
+    async fn prepare<T, F>(
+        &self,
+        sql: impl AsRef<str> + Send + 'static,
+        f: F,
+    ) -> rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Statement<'_>) -> rusqlite::Result<T> + Send + 'static,
+    {
+        f(self.lock().await.prepare(sql.as_ref())?)
+    }
+
+    async fn query_row<T, P, F>(
+        &self,
+        sql: impl AsRef<str> + Send + 'static,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        P: Params + Send + 'static,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
+    {
+        self.lock().await.query_row(sql.as_ref(), params, f)
+    }
+
+    async fn query_one<T, P, F>(
+        &self,
+        sql: impl AsRef<str> + Send + 'static,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        P: Params + Send + 'static,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
+    {
+        self.lock().await.query_one(sql.as_ref(), params, f)
+    }
+
+    async fn query_many<T, P, F>(
+        &self,
+        sql: impl AsRef<str> + Send + 'static,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<Vec<T>>
+    where
+        T: Send + 'static,
+        P: Params + Send + 'static,
+        F: FnMut(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
+    {
+        self.lock().await.prepare(sql.as_ref())?.query_and_then(params, f)?.collect()
+    }
+
+    async fn with_transaction<T, E, F>(&self, f: F) -> Result<T, E>
+    where
+        T: Send + 'static,
+        E: From<rusqlite::Error> + Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
+    {
+        let mut conn = self.lock().await;
+        let txn = conn.transaction()?;
+        let result = f(&txn)?;
+        txn.commit()?;
+        Ok(result)
+    }
+
+    async fn with_immediate_transaction<T, E, F>(&self, f: F) -> Result<T, E>
+    where
+        T: Send + 'static,
+        E: From<rusqlite::Error> + Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
+    {
+        let mut conn = self.lock().await;
+
+        // Start the transaction in IMMEDIATE mode since all updates may
+        // cause writes, to avoid read transactions upgrading to write mode
+        // and causing SQLITE_BUSY errors. See also:
+        // https://www.sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
+
+        let run_and_catch = || -> Result<T, E> {
+            let txn = conn.transaction()?;
+            let res = f(&txn)?;
+            txn.commit()?;
+            Ok(res)
+        };
+
+        let result = run_and_catch();
+
+        // Reset the transaction behavior to use Deferred, after this
+        // transaction has been run, whether it was successful or not.
+        conn.set_transaction_behavior(TransactionBehavior::Deferred);
+
+        result
     }
 
     async fn chunk_large_query_over<Query, Res>(
@@ -376,22 +492,7 @@ impl SqliteAsyncConnExt for SqliteAsyncConn {
     }
 }
 
-/// Map an [`InteractError`] into a [`rusqlite::Error`].
-///
-/// An [`InteractError::Panic`] will panic. An [`InteractError::Cancelled`] will
-/// generate a [`rusqlite::Error::SqliteFailure`] with the
-/// [`rusqlite::ffi::SQLITE_ABORT`] code.
-pub(super) fn map_interact_err(error: InteractError) -> rusqlite::Error {
-    match error {
-        InteractError::Panic(p) => panic!("{p:?}"),
-        InteractError::Cancelled => rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
-            None,
-        ),
-    }
-}
-
-pub(crate) trait SqliteTransactionExt {
+pub(crate) trait TransactionExt {
     /// See [`SqliteAsyncConnExt::chunk_large_query_over`].
     fn chunk_large_query_over<Key, Query, Res>(
         &self,
@@ -434,7 +535,7 @@ impl<Key> ChunkFromLargeQuery<Key> {
     }
 }
 
-impl SqliteTransactionExt for Transaction<'_> {
+impl TransactionExt for Transaction<'_> {
     fn chunk_large_query_over<Key, Query, Res>(
         &self,
         mut keys_to_chunk: Vec<Key>,
@@ -478,7 +579,7 @@ impl SqliteTransactionExt for Transaction<'_> {
     }
 }
 
-/// Extension trait for a [`rusqlite::Connection`] that contains a key-value
+/// Extension trait for a [`SqliteConnection`] that contains a key-value
 /// table named `kv`.
 ///
 /// The table should be created like this:
@@ -489,7 +590,9 @@ impl SqliteTransactionExt for Transaction<'_> {
 ///     "value" BLOB NOT NULL
 /// );
 /// ```
-pub(crate) trait SqliteKeyValueStoreConnExt {
+///
+/// [`SqliteConnection`]: super::connection::SqliteConnection
+pub(crate) trait KeyValueStoreSqliteConnectionExt {
     /// Store the given value for the given key.
     fn set_kv(&self, key: &str, value: &[u8]) -> rusqlite::Result<()>;
 
@@ -510,7 +613,7 @@ pub(crate) trait SqliteKeyValueStoreConnExt {
     }
 }
 
-impl SqliteKeyValueStoreConnExt for rusqlite::Connection {
+impl KeyValueStoreSqliteConnectionExt for SqliteConnection {
     fn set_kv(&self, key: &str, value: &[u8]) -> rusqlite::Result<()> {
         self.execute(
             "INSERT INTO kv VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2",
@@ -525,7 +628,7 @@ impl SqliteKeyValueStoreConnExt for rusqlite::Connection {
     }
 }
 
-/// Extension trait for an [`SqliteAsyncConn`] that contains a key-value table
+/// Extension trait for a [`ConnectionExt`] that contains a key-value table
 /// named `kv`.
 ///
 /// The table should be created like this:
@@ -537,7 +640,7 @@ impl SqliteKeyValueStoreConnExt for rusqlite::Connection {
 /// );
 /// ```
 #[async_trait]
-pub(crate) trait SqliteKeyValueStoreAsyncConnExt: SqliteAsyncConnExt {
+pub(crate) trait KeyValueStoreConnectionExt: ConnectionExt {
     /// Whether the `kv` table exists in this database.
     async fn kv_table_exists(&self) -> rusqlite::Result<bool> {
         self.query_row(
@@ -685,10 +788,10 @@ pub(crate) trait SqliteKeyValueStoreAsyncConnExt: SqliteAsyncConnExt {
 }
 
 #[async_trait]
-impl SqliteKeyValueStoreAsyncConnExt for SqliteAsyncConn {
+impl KeyValueStoreConnectionExt for Connection {
     async fn set_kv(&self, key: &str, value: Vec<u8>) -> rusqlite::Result<()> {
         let key = key.to_owned();
-        self.interact(move |conn| conn.set_kv(&key, &value)).await.unwrap()?;
+        self.lock().await.set_kv(&key, &value)?;
 
         Ok(())
     }
@@ -699,14 +802,14 @@ impl SqliteKeyValueStoreAsyncConnExt for SqliteAsyncConn {
         value: T,
     ) -> Result<()> {
         let key = key.to_owned();
-        self.interact(move |conn| conn.set_serialized_kv(&key, value)).await.unwrap()?;
+        self.lock().await.set_serialized_kv(&key, value)?;
 
         Ok(())
     }
 
     async fn clear_kv(&self, key: &str) -> rusqlite::Result<()> {
         let key = key.to_owned();
-        self.interact(move |conn| conn.clear_kv(&key)).await.unwrap()?;
+        self.lock().await.clear_kv(&key)?;
 
         Ok(())
     }

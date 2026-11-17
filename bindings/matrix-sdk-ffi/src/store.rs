@@ -241,7 +241,7 @@ mod sqlite {
             }
 
             if let Some(size) = self.pool_max_size {
-                sqlite_store_config = sqlite_store_config.pool_max_size(size);
+                sqlite_store_config = sqlite_store_config.pool_desired_size(size);
             }
 
             if let Some(size) = self.cache_size {

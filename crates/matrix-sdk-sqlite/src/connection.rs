@@ -12,125 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An implementation of `deadpool` for `rusqlite`.
-//!
-//! Initially, we were using `deadpool-sqlite`, that is also using `rusqlite` as
-//! the SQLite interface. However, in the implementation of
-//! [`deadpool::managed::Manager`], when recycling an object (i.e. an SQLite
-//! connection), [a SQL query is run to detect whether the connection is still
-//! alive][connection-test]. It creates performance issues:
-//!
-//! 1. It runs a prepared SQL query, which has a non-negligle cost. Imagine each
-//!    connection is used to run on average one query; when recycled, a second
-//!    query was constantly run. Even if it's a simple query, it requires to
-//!    prepare a statement, to run and to query it.
-//! 2. The SQL query was run in a blocking task. Indeed,
-//!    `deadpool_runtime::spawn_blocking` is used (via
-//!    `deadpool_sync::SyncWrapper::interact`), which includes [blocking the
-//!    thread, acquiring a lock][spawn_blocking] etc. All this has more
-//!    performance cost.
-//!
-//! Measures have shown it is a performance bottleneck for us, especially on
-//! Android. Why specifically on Android and not other systems? This is still
-//! unclear at the time of writing (2025-11-11), despites having spent several
-//! days digging and trying to find an answer to this question.
-//!
-//! We have tried to use another approach to test the aliveness of the
-//! connections without running queries. It has involved patching `rusqlite` to
-//! add more bindings to SQLite, and patching `deadpool` itself, but without any
-//! successful results.
-//!
-//! Finally, we have started questioning the reason of this test: why testing
-//! whether the connection was still alive? After all, there is no reason a
-//! connection should die in our case:
-//!
-//! - all connections are local,
-//! - all interactions are behind [WAL], which is local only,
-//! - even if for an unknown reason the connection died, using it next time
-//!   would create an error… exactly what would happen when recycling the
-//!   connection.
-//!
-//! Consequently, we have created a new implementation of `deadpool` for
-//! `rusqlite` that doesn't test the aliveness of the connections when recycled.
-//! We assume they are all alive.
-//!
-//! This implementation is, at the time of writing (2025-11-11):
-//!
-//! - 3.5 times faster on Android than `deadpool-sqlite`, removing the lock and
-//!   thread contention entirely,
-//! - 2 times faster on iOS.
-//!
-//! [connection-test]: https://github.com/deadpool-rs/deadpool/blob/d6f7d58756f0cc7bdd1f3d54d820c1332d67e4d5/crates/deadpool-sqlite/src/lib.rs#L80-L100
-//! [spawn_blocking]: https://github.com/deadpool-rs/deadpool/blob/d6f7d58756f0cc7bdd1f3d54d820c1332d67e4d5/crates/deadpool-sync/src/lib.rs#L113-L131
-//! [WAL]: https://www.sqlite.org/wal.html
+//! Pool implementation.
 
-use std::{convert::Infallible, ops::Deref, path::PathBuf, sync::Arc, time::Duration};
+use std::{ops::Deref, path::PathBuf, sync::Arc};
 
-pub use deadpool::managed::reexports::*;
-use deadpool::managed::{self, Metrics, PoolConfig, RecycleError};
-use deadpool_sync::SyncWrapper;
-use tokio::{runtime::Handle, sync::Mutex};
-use tracing::{info, warn};
+use tokio::sync::Mutex;
 
-/// The default runtime used by `matrix-sdk-sqlite` for `deadpool`.
-pub const RUNTIME: Runtime = Runtime::Tokio1;
-
-deadpool::managed_reexports!(
-    "matrix-sdk-sqlite",
-    Manager,
-    managed::Object<Manager>,
-    rusqlite::Error,
-    Infallible
-);
+pub type SqliteConnection = rusqlite::Connection;
+pub type LockedSqliteConnection = Arc<Mutex<SqliteConnection>>;
+pub type Connection =
+    flaque::Object<LockedSqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
+pub type Pool = flaque::Pool<LockedSqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
 
 /// Type representing a connection to SQLite from the [`Pool`].
-pub type Connection = Object;
+// pub type Connection = flaque::Object<SqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
 
-/// [`Manager`][managed::Manager] for creating and recycling SQLite
-/// [`Connection`]s.
+#[derive(Clone, Copy, Debug)]
+pub struct PoolConfig {
+    pub desired_size: usize,
+}
+
 #[derive(Debug)]
-pub struct Manager {
+pub struct SqliteConnectionBuilder {
     pub(crate) database_path: PathBuf,
     runtime_config: crate::RuntimeConfig,
 }
 
-impl Manager {
-    /// Creates a new [`Manager`] for a database.
+impl SqliteConnectionBuilder {
+    /// Creates a new [`ObjectBuilder`] for a database.
     #[must_use]
     pub(crate) fn new(database_path: PathBuf, runtime_config: crate::RuntimeConfig) -> Self {
         Self { database_path, runtime_config }
     }
 }
 
-impl managed::Manager for Manager {
-    type Type = SyncWrapper<rusqlite::Connection>;
+impl flaque::AsyncBuilder<LockedSqliteConnection> for SqliteConnectionBuilder {
     type Error = rusqlite::Error;
 
-    async fn create(&self) -> Result<Self::Type, Self::Error> {
+    fn build_object(&self) -> impl Future<Output = Result<LockedSqliteConnection, Self::Error>> {
         let path = self.database_path.clone();
         let pragmas = self.runtime_config.connection_pragmas();
 
-        SyncWrapper::new(RUNTIME, move || {
+        async move {
             let conn = rusqlite::Connection::open(path)?;
             conn.execute_batch(&pragmas)?;
 
-            Ok(conn)
-        })
-        .await
-    }
-
-    async fn recycle(
-        &self,
-        conn: &mut Self::Type,
-        _: &Metrics,
-    ) -> managed::RecycleResult<Self::Error> {
-        if conn.is_mutex_poisoned() {
-            return Err(RecycleError::Message(
-                "Mutex is poisoned. Connection is considered unusable.".into(),
-            ));
+            Ok(Arc::new(Mutex::new(conn)))
         }
-
-        Ok(())
     }
 }
 
@@ -148,89 +76,52 @@ impl managed::Manager for Manager {
 /// This is still best effort: if another cloned `Arc` or an
 /// `OwnedMutexGuard<Connection>` is still alive elsewhere, the underlying
 /// SQLite connection may remain alive until that handle is dropped.
-pub async fn close_connection(write_connection: Arc<Mutex<Connection>>) {
+pub async fn close_connection(write_connection: Connection) {
+    /*
     // Acquire the lock to wait for any in-flight write to complete.
     let guard = write_connection.lock().await;
 
     // Flush WAL and release locks while we still own the connection.
-    let _ = guard
-        .interact(|raw| {
-            raw.execute_batch("PRAGMA locking_mode = NORMAL; PRAGMA wal_checkpoint(TRUNCATE);")
-                .ok();
-        })
-        .await;
+    let _ = guard.execute_batch("PRAGMA locking_mode = NORMAL; PRAGMA wal_checkpoint(TRUNCATE);");
 
     drop(guard);
+    */
 
     // Drop the store-owned Arc on a blocking thread.
-    let _ = tokio::task::spawn_blocking(move || drop(write_connection)).await;
+    // let _ = tokio::task::spawn_blocking(move ||
+    // drop(write_connection)).await;
 }
 
 /// Live database connections held by each SQLite store.
-///
-/// Wrapped in `Option<SqliteConnections>` guarded by a `Mutex` inside each
-/// store; `Some` means the store is active, `None` means it is closed.
-pub(crate) struct SqliteConnectionsInner {
+pub(crate) struct Connections {
     /// The pool of read connections.
     pub pool: Pool,
+
     /// The dedicated write connection.
-    ///
-    /// This lives behind `Arc<Mutex<_>>` so stores can clone the `Arc` and
-    /// obtain an `OwnedMutexGuard<Connection>` without holding the outer
-    /// `connections` mutex across await points.
-    pub write_connection: Arc<Mutex<Connection>>,
+    pub write_connection: Connection,
 }
 
-/// The wrapper holding the [`SqliteConnectionsInner`] of a store.
+/// The wrapper holding the [`ConnectionsInner`] of a store.
 ///
-/// It derefs to `Mutex<Option<SqliteConnectionsInner>>`, where `Some` means the
+/// It derefs to `Mutex<Option<ConnectionsInner>>`, where `Some` means the
 /// store is active and `None` means it is closed.
-///
-/// On top of that, it makes sure the connections are dropped within the context
-/// of a Tokio runtime. Dropping a [`deadpool_sync::SyncWrapper`] (i.e. a
-/// [`Connection`], or a [`Pool`] holding idle ones) calls
-/// `tokio::task::spawn_blocking`, which panics when called from a thread that
-/// isn't running inside a Tokio runtime. This can happen when the last owner of
-/// the store is dropped from a foreign thread, e.g. by the FFI bindings.
-///
-/// To avoid this, the handle of the runtime that was current when the slot was
-/// created is captured, and entered when the connections are dropped.
-pub(crate) struct SqliteConnections {
-    inner: Mutex<Option<SqliteConnectionsInner>>,
-    runtime: Handle,
+pub(crate) struct MaybeConnections {
+    inner: Mutex<Option<Connections>>,
 }
 
-impl SqliteConnections {
+impl MaybeConnections {
     /// Create a new wrapper for an active store.
-    ///
-    /// This must be called from within a Tokio runtime for the connections to
-    /// be safely dropped from any thread later on.
     #[allow(clippy::unused_async)]
-    pub async fn new(connections: SqliteConnectionsInner) -> Self {
-        Self { inner: Mutex::new(Some(connections)), runtime: Handle::current() }
+    pub async fn new(connections: Connections) -> Self {
+        Self { inner: Mutex::new(Some(connections)) }
     }
 }
 
-impl Deref for SqliteConnections {
-    type Target = Mutex<Option<SqliteConnectionsInner>>;
+impl Deref for MaybeConnections {
+    type Target = Mutex<Option<Connections>>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-impl Drop for SqliteConnections {
-    fn drop(&mut self) {
-        let Some(connections) = self.inner.get_mut().take() else {
-            // The store was closed, there's nothing to drop.
-            return;
-        };
-
-        // Enter the runtime, so the `SyncWrapper`s can be dropped on a blocking
-        // task of this runtime, whatever the current thread is.
-        let _guard = self.runtime.enter();
-
-        drop(connections);
     }
 }
 
@@ -241,7 +132,8 @@ impl Drop for SqliteConnections {
 /// [`reopen_connections`] is called.
 ///
 /// Idempotent: if the store is already closed this is a no-op.
-pub(crate) async fn close_connections(connections: &SqliteConnections, label: &str) {
+pub(crate) async fn close_connections(connections: &MaybeConnections, label: &str) {
+    /*
     let mut guard = connections.lock().await;
     let Some(conns) = guard.take() else {
         // Already closed — idempotent.
@@ -292,17 +184,19 @@ pub(crate) async fn close_connections(connections: &SqliteConnections, label: &s
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    */
 }
 
 /// Resume a store by rebuilding its connections.
 ///
 /// Idempotent: if the store is already active this is a no-op.
 pub(crate) async fn reopen_connections(
-    connections: &SqliteConnections,
+    connections: &MaybeConnections,
     db_path: PathBuf,
     pool_config: PoolConfig,
     runtime_config: crate::RuntimeConfig,
 ) -> crate::error::Result<()> {
+    /*
     use crate::utils::SqliteAsyncConnExt as _;
 
     let mut guard = connections.lock().await;
@@ -326,6 +220,8 @@ pub(crate) async fn reopen_connections(
     *guard =
         Some(SqliteConnectionsInner { pool, write_connection: Arc::new(Mutex::new(write_conn)) });
 
+    Ok(())
+    */
     Ok(())
 }
 

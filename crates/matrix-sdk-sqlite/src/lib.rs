@@ -39,7 +39,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use deadpool::managed::PoolConfig;
+use connection::PoolConfig;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[cfg(feature = "crypto-store")]
@@ -129,7 +129,9 @@ impl SqliteStoreConfig {
     {
         Self {
             path: path.as_ref().to_path_buf(),
-            pool_config: PoolConfig::new(max(POOL_MINIMUM_SIZE, num_cpus::get_physical() * 4)),
+            pool_config: PoolConfig {
+                desired_size: max(POOL_MINIMUM_SIZE, num_cpus::get_physical() * 4),
+            },
             runtime_config: RuntimeConfig::default(),
             secret: None,
         }
@@ -150,7 +152,7 @@ impl SqliteStoreConfig {
     {
         Self::new(path)
             // Maximum one connection per physical thread.
-            .pool_max_size(num_cpus::get_physical())
+            .pool_desired_size(num_cpus::get_physical())
             // Cache size is 500Kib.
             .cache_size(500_000)
             // Journal size limit is 2Mib.
@@ -216,11 +218,9 @@ impl SqliteStoreConfig {
         self
     }
 
-    /// Define the maximum pool size for [`deadpool`].
-    ///
-    /// See [`deadpool::managed::PoolConfig::max_size`] to learn more.
-    pub fn pool_max_size(mut self, max_size: usize) -> Self {
-        self.pool_config.max_size = max(POOL_MINIMUM_SIZE, max_size);
+    /// Define the desired pool size for [`flaque`].
+    pub fn pool_desired_size(mut self, max_size: usize) -> Self {
+        self.pool_config.desired_size = max(POOL_MINIMUM_SIZE, max_size);
         self
     }
 
@@ -300,18 +300,13 @@ impl SqliteStoreConfig {
     }
 
     /// Build a pool of active connections to a particular database.
-    pub fn build_pool_of_connections(
-        &self,
-        database_name: &str,
-    ) -> Result<connection::Pool, connection::CreatePoolError> {
+    pub fn build_pool_of_connections(&self, database_name: &str) -> connection::Pool {
         let path = self.path.join(database_name);
-        let manager = connection::Manager::new(path, self.runtime_config);
 
-        connection::Pool::builder(manager)
-            .config(self.pool_config)
-            .runtime(connection::RUNTIME)
-            .build()
-            .map_err(connection::CreatePoolError::Build)
+        flaque::Pool::new_with_async_builder(
+            self.pool_config().desired_size,
+            connection::SqliteConnectionBuilder::new(path, self.runtime_config),
+        )
     }
 }
 
@@ -421,7 +416,7 @@ mod tests {
     fn test_new() {
         let store_config = SqliteStoreConfig::new(Path::new("foo"));
 
-        assert_eq!(store_config.pool_config.max_size, num_cpus::get_physical() * 4);
+        assert_eq!(store_config.pool_config.desired_size, num_cpus::get_physical() * 4);
         assert!(store_config.runtime_config.optimize);
         assert_eq!(store_config.runtime_config.cache_size, 2_000_000);
         assert_eq!(store_config.runtime_config.journal_size_limit, 10_000_000);
@@ -432,7 +427,7 @@ mod tests {
     fn test_with_low_memory_config() {
         let store_config = SqliteStoreConfig::with_low_memory_config(Path::new("foo"));
 
-        assert_eq!(store_config.pool_config.max_size, num_cpus::get_physical());
+        assert_eq!(store_config.pool_config.desired_size, num_cpus::get_physical());
         assert!(store_config.runtime_config.optimize);
         assert_eq!(store_config.runtime_config.cache_size, 500_000);
         assert_eq!(store_config.runtime_config.journal_size_limit, 2_000_000);
@@ -443,7 +438,7 @@ mod tests {
     fn test_store_config_when_passphrase() {
         let store_config = SqliteStoreConfig::new(Path::new("foo"))
             .passphrase(Some("bar"))
-            .pool_max_size(42)
+            .pool_desired_size(42)
             .optimize(false)
             .cache_size(43)
             .journal_size_limit(44)
@@ -451,7 +446,7 @@ mod tests {
 
         assert_eq!(store_config.path, PathBuf::from("foo"));
         assert_eq!(store_config.secret, Some(Secret::PassPhrase("bar".to_owned().into())));
-        assert_eq!(store_config.pool_config.max_size, 42);
+        assert_eq!(store_config.pool_config.desired_size, 42);
         assert!(store_config.runtime_config.optimize.not());
         assert_eq!(store_config.runtime_config.cache_size, 43);
         assert_eq!(store_config.runtime_config.journal_size_limit, 44);
@@ -465,7 +460,7 @@ mod tests {
                 143, 27, 202, 78, 96, 55, 13, 149, 247, 8, 33, 120, 204, 92, 171, 66, 19, 238, 61,
                 107, 132, 211, 40, 244, 71, 190, 99, 14, 173, 225, 6, 156,
             ]))
-            .pool_max_size(42)
+            .pool_desired_size(42)
             .optimize(false)
             .cache_size(43)
             .journal_size_limit(44)
@@ -479,7 +474,7 @@ mod tests {
                 107, 132, 211, 40, 244, 71, 190, 99, 14, 173, 225, 6, 156,
             ])))
         );
-        assert_eq!(store_config.pool_config.max_size, 42);
+        assert_eq!(store_config.pool_config.desired_size, 42);
         assert!(store_config.runtime_config.optimize.not());
         assert_eq!(store_config.runtime_config.cache_size, 43);
         assert_eq!(store_config.runtime_config.journal_size_limit, 44);
@@ -495,8 +490,8 @@ mod tests {
 
     #[test]
     fn test_pool_size_has_a_minimum() {
-        let store_config = SqliteStoreConfig::new(Path::new("foo")).pool_max_size(1);
+        let store_config = SqliteStoreConfig::new(Path::new("foo")).pool_desired_size(1);
 
-        assert_eq!(store_config.pool_config.max_size, POOL_MINIMUM_SIZE);
+        assert_eq!(store_config.pool_config.desired_size, POOL_MINIMUM_SIZE);
     }
 }

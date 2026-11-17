@@ -32,8 +32,7 @@ experimental-push-secrets = [
 as_variant.workspace = true
 async-trait.workspace = true
 base64.workspace = true
-deadpool = { version = "0.13", default-features = false, features = ["managed", "rt_tokio_1"] }
-deadpool-sync = { version = "0.2", default-features = false }
+flaque = { path = "../../../../flaque/flaque/" }
 itertools.workspace = true
 matrix-sdk-base = { workspace = true, optional = true }
 matrix-sdk-crypto = { workspace = true, optional = true }

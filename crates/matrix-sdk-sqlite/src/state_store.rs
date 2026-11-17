@@ -48,13 +48,12 @@ use tracing::{debug, instrument, warn};
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
     connection::{
-        self, Connection as SqliteAsyncConn, Pool as SqlitePool, SqliteConnections,
-        SqliteConnectionsInner,
+        self, Connection as SqliteAsyncConn, Connections, MaybeConnections, Pool as SqlitePool,
     },
     error::{Error, Result},
     utils::{
-        EncryptableStore, Key, SqliteAsyncConnExt, SqliteKeyValueStoreAsyncConnExt,
-        SqliteKeyValueStoreConnExt, SqliteTransactionExt,
+        ConnectionExt, EncryptableStore, Key, KeyValueStoreConnectionExt,
+        KeyValueStoreSqliteConnectionExt, TransactionExt,
     },
 };
 
@@ -84,7 +83,7 @@ pub struct SqliteStateStore {
     store_cipher: Option<Arc<StoreCipher>>,
 
     /// `Some` when active, `None` when closed.
-    connections: Arc<SqliteConnections>,
+    connections: Arc<MaybeConnections>,
 
     /// Retained so we can rebuild the pool on reopen.
     db_path: PathBuf,
@@ -162,7 +161,7 @@ impl SqliteStateStore {
         let this = Self {
             store_cipher,
             connections: Arc::new(
-                SqliteConnections::new(SqliteConnectionsInner {
+                MaybeConnections::new(Connections {
                     pool,
                     write_connection: Arc::new(Mutex::new(conn)),
                 })
@@ -953,7 +952,7 @@ impl SqliteConnectionStateStoreExt for rusqlite::Connection {
 }
 
 #[async_trait]
-trait SqliteObjectStateStoreExt: SqliteAsyncConnExt {
+trait SqliteObjectStateStoreExt: ConnectionExt {
     async fn get_kv_blob(&self, key: Key) -> Result<Option<Vec<u8>>> {
         Ok(self
             .query_one("SELECT value FROM kv_blob WHERE key = ?", (key,), |row| row.get(0))
@@ -2843,7 +2842,7 @@ mod encrypted_tests {
     use tempfile::{TempDir, tempdir};
 
     use super::SqliteStateStore;
-    use crate::{Base64Variant, SqliteStoreConfig, Synchronous, utils::SqliteAsyncConnExt};
+    use crate::{Base64Variant, SqliteStoreConfig, Synchronous, utils::ConnectionExt};
 
     static TMP_DIR: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
     static NUM: AtomicU32 = AtomicU32::new(0);
@@ -2918,7 +2917,7 @@ mod encrypted_tests {
     #[async_test]
     async fn test_pool_size() {
         let tmpdir_path = new_state_store_workspace();
-        let store_open_config = SqliteStoreConfig::new(tmpdir_path).pool_max_size(42);
+        let store_open_config = SqliteStoreConfig::new(tmpdir_path).pool_desired_size(42);
 
         let store = SqliteStateStore::open_with_config(&store_open_config).await.unwrap();
 
@@ -3036,7 +3035,7 @@ mod migration_tests {
     use crate::{
         OpenStoreError, Secret, SqliteStoreConfig, connection,
         error::{Error, Result},
-        utils::{EncryptableStore as _, SqliteAsyncConnExt, SqliteKeyValueStoreAsyncConnExt},
+        utils::{ConnectionExt, EncryptableStore as _, KeyValueStoreConnectionExt},
     };
 
     static TMP_DIR: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
@@ -3067,7 +3066,7 @@ mod migration_tests {
         let this = SqliteStateStore {
             store_cipher,
             connections: Arc::new(
-                connection::SqliteConnections::new(connection::SqliteConnectionsInner {
+                connection::MaybeConnections::new(connection::Connections {
                     pool,
                     write_connection: Arc::new(Mutex::new(conn)),
                 })

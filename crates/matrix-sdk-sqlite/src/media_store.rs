@@ -22,7 +22,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use deadpool::managed::PoolConfig;
 use matrix_sdk_base::{
     cross_process_lock::CrossProcessLockGeneration,
     media::{
@@ -37,22 +36,18 @@ use matrix_sdk_base::{
 use matrix_sdk_store_encryption::StoreCipher;
 use ruma::{MilliSecondsSinceUnixEpoch, MxcUri, OwnedMxcUri, time::SystemTime};
 use rusqlite::{OptionalExtension, params_from_iter};
-use tokio::{
-    fs,
-    sync::{Mutex, OwnedMutexGuard},
-};
+use tokio::{fs, sync::OwnedMutexGuard};
 use tracing::{debug, instrument};
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
     connection::{
-        self, Connection as SqliteAsyncConn, Pool as SqlitePool, SqliteConnections,
-        SqliteConnectionsInner,
+        self, Connection, Connections, MaybeConnections, Pool, PoolConfig, SqliteConnection,
     },
     error::{Error, Result},
     utils::{
-        EncryptableStore, SqliteAsyncConnExt, SqliteKeyValueStoreAsyncConnExt,
-        SqliteKeyValueStoreConnExt, SqliteTransactionExt, time_to_timestamp,
+        ConnectionExt, EncryptableStore, KeyValueStoreConnectionExt,
+        KeyValueStoreSqliteConnectionExt, TransactionExt, time_to_timestamp,
     },
 };
 
@@ -74,7 +69,7 @@ pub struct SqliteMediaStore {
     store_cipher: Option<Arc<StoreCipher>>,
 
     /// `Some` when active, `None` when closed.
-    connections: Arc<SqliteConnections>,
+    connections: Arc<MaybeConnections>,
 
     /// Retained so we can rebuild the pool on reopen.
     db_path: PathBuf,
@@ -133,14 +128,14 @@ impl SqliteMediaStore {
         let pool_config = config.pool_config();
         let runtime_config = config.runtime_config();
 
-        let pool = config.build_pool_of_connections(DATABASE_NAME)?;
+        let pool = config.build_pool_of_connections(DATABASE_NAME);
 
         let this =
             Self::open_with_pool(pool, db_path, pool_config, runtime_config, config.secret.clone())
                 .await?;
 
         // Apply runtime config on the write connection.
-        this.write().await?.apply_runtime_config(runtime_config).await?;
+        this.read().await?.apply_runtime_config(runtime_config).await?;
 
         Ok(this)
     }
@@ -148,7 +143,7 @@ impl SqliteMediaStore {
     /// Open an SQLite-based media store using the given SQLite database pool.
     /// The given passphrase will be used to encrypt private data.
     async fn open_with_pool(
-        pool: SqlitePool,
+        pool: Pool,
         db_path: PathBuf,
         pool_config: PoolConfig,
         runtime_config: RuntimeConfig,
@@ -171,15 +166,15 @@ impl SqliteMediaStore {
         let last_media_cleanup_time = conn.get_serialized_kv(keys::LAST_MEDIA_CLEANUP_TIME).await?;
         media_service.restore(media_retention_policy, last_media_cleanup_time);
 
-        let connections = SqliteConnectionsInner {
+        let connections = Connections {
             pool,
             // Use `conn` as our selected write connection.
-            write_connection: Arc::new(Mutex::new(conn)),
+            write_connection: conn,
         };
 
         Ok(Self {
             store_cipher,
-            connections: Arc::new(SqliteConnections::new(connections).await),
+            connections: Arc::new(MaybeConnections::new(connections).await),
             db_path,
             pool_config,
             runtime_config,
@@ -189,34 +184,28 @@ impl SqliteMediaStore {
 
     // Acquire a connection for executing read operations.
     #[instrument(skip_all)]
-    async fn read(&self) -> Result<SqliteAsyncConn> {
-        let pool = {
-            let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
+    async fn read(&self) -> Result<Connection> {
+        let new_read_connection = {
+            let connections = self.connections.lock().await;
+            connections.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
         };
-
-        let connection = pool.get().await?;
 
         // Per https://www.sqlite.org/foreignkeys.html#fk_enable, foreign key
         // support must be enabled on a per-connection basis. Execute it every
         // time we try to get a connection, since we can't guarantee a previous
         // connection did enable it before.
-        connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
+        new_read_connection.lock().await.execute_batch("PRAGMA foreign_keys = ON;")?;
 
-        Ok(connection)
+        Ok(new_read_connection)
     }
 
     // Acquire a connection for executing write operations.
     #[instrument(skip_all)]
-    async fn write(&self) -> Result<OwnedMutexGuard<SqliteAsyncConn>> {
+    async fn write(&self) -> Result<OwnedMutexGuard<SqliteConnection>> {
         let write_connection = {
             let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.write_connection.clone()
+            guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.lock_owned().await
         };
-
-        let connection = write_connection.lock_owned().await;
 
         // Specify a busy timeout so that operations are automatically retried,
         // in case the database was marked as locked, which can happen
@@ -225,33 +214,29 @@ impl SqliteMediaStore {
         // The timeout value is in milliseconds.
         //
         // See also https://www.sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode.
-        connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
+        write_connection.execute_batch("PRAGMA busy_timeout = 2000;")?;
 
         // Per https://www.sqlite.org/foreignkeys.html#fk_enable, foreign key
         // support must be enabled on a per-connection basis. Execute it every
         // time we try to get a connection, since we can't guarantee a previous
         // connection did enable it before.
-        connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
+        write_connection.execute_batch("PRAGMA foreign_keys = ON;")?;
 
-        Ok(connection)
+        Ok(write_connection)
     }
 
     pub async fn vacuum(&self) -> Result<()> {
-        let write_connection = {
-            let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.write_connection.clone()
-        };
-        write_connection.lock().await.vacuum().await
+        let guard = self.connections.lock().await;
+        guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.vacuum().await
     }
 
     async fn get_db_size(&self) -> Result<Option<usize>> {
-        let pool = {
-            let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
+        let new_read_connection = {
+            let connections = self.connections.lock().await;
+            connections.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
         };
-        Ok(Some(pool.get().await?.get_db_size().await?))
+
+        Ok(Some(new_read_connection.get_db_size().await?))
     }
 
     pub async fn close(&self) -> Result<()> {
@@ -274,12 +259,12 @@ impl SqliteMediaStore {
     #[cfg(test)]
     async fn pool_max_size(&self) -> Option<usize> {
         let guard = self.connections.lock().await;
-        guard.as_ref().map(|conns| conns.pool.status().max_size)
+        guard.as_ref().map(|conns| conns.pool.size())
     }
 }
 
 /// Run migrations for the given version of the database.
-async fn run_migrations(conn: &SqliteAsyncConn, version: u8) -> Result<()> {
+async fn run_migrations(conn: &Connection, version: u8) -> Result<()> {
     // Always enable foreign keys for the current connection.
     conn.execute_batch("PRAGMA foreign_keys = ON;").await?;
 
@@ -389,8 +374,7 @@ impl MediaStore for SqliteMediaStore {
         conn.execute(
             r#"UPDATE media SET uri = ?, format = ? WHERE uri = ? AND format = ?"#,
             (new_uri, new_format, prev_uri, prev_format),
-        )
-        .await?;
+        )?;
 
         Ok(())
     }
@@ -410,7 +394,7 @@ impl MediaStore for SqliteMediaStore {
         let format = self.encode_key(keys::MEDIA, request.format.unique_key());
 
         let conn = self.write().await?;
-        conn.execute("DELETE FROM media WHERE uri = ? AND format = ?", (uri, format)).await?;
+        conn.execute("DELETE FROM media WHERE uri = ? AND format = ?", (uri, format))?;
 
         Ok(())
     }
@@ -788,7 +772,7 @@ mod tests {
     use tempfile::{TempDir, tempdir};
 
     use super::SqliteMediaStore;
-    use crate::{SqliteStoreConfig, utils::SqliteAsyncConnExt};
+    use crate::{SqliteStoreConfig, utils::ConnectionExt};
 
     static TMP_DIR: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
     static NUM: AtomicU32 = AtomicU32::new(0);
@@ -825,7 +809,7 @@ mod tests {
     #[async_test]
     async fn test_pool_size() {
         let tmpdir_path = new_media_store_workspace();
-        let store_open_config = SqliteStoreConfig::new(tmpdir_path).pool_max_size(42);
+        let store_open_config = SqliteStoreConfig::new(tmpdir_path).pool_desired_size(42);
 
         let store = SqliteMediaStore::open_with_config(&store_open_config).await.unwrap();
 

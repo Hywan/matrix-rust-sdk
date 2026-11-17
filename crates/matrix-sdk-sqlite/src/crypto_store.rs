@@ -55,13 +55,12 @@ use zeroize::Zeroizing;
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
     connection::{
-        self, Connection as SqliteAsyncConn, Pool as SqlitePool, SqliteConnections,
-        SqliteConnectionsInner,
+        self, Connection as SqliteAsyncConn, Connections, MaybeConnections, Pool as SqlitePool,
     },
     error::{Error, Result},
     utils::{
-        EncryptableStore, Key, SqliteAsyncConnExt, SqliteKeyValueStoreAsyncConnExt,
-        SqliteKeyValueStoreConnExt, map_interact_err,
+        ConnectionExt, EncryptableStore, Key, KeyValueStoreConnectionExt,
+        KeyValueStoreSqliteConnectionExt, map_interact_err,
     },
 };
 
@@ -75,7 +74,7 @@ pub struct SqliteCryptoStore {
 
     /// `Some` when active, `None` when closed. The outer `Mutex` serialises
     /// close/reopen with connection access.
-    connections: Arc<SqliteConnections>,
+    connections: Arc<MaybeConnections>,
 
     /// Retained so we can rebuild the pool on reopen.
     db_path: PathBuf,
@@ -131,7 +130,7 @@ impl SqliteCryptoStore {
         Ok(Self {
             store_cipher,
             connections: Arc::new(
-                SqliteConnections::new(SqliteConnectionsInner {
+                MaybeConnections::new(Connections {
                     pool,
                     write_connection: Arc::new(Mutex::new(conn)),
                 })
@@ -801,7 +800,7 @@ impl SqliteConnectionExt for rusqlite::Connection {
 }
 
 #[async_trait]
-trait SqliteObjectCryptoStoreExt: SqliteAsyncConnExt {
+trait SqliteObjectCryptoStoreExt: ConnectionExt {
     async fn get_sessions_for_sender_key(&self, sender_key: Key) -> Result<Vec<Vec<u8>>> {
         Ok(self
             .prepare("SELECT data FROM session WHERE sender_key = ?", |mut stmt| {
@@ -1995,7 +1994,7 @@ mod tests {
     #[async_test]
     async fn test_pool_size() {
         let store_open_config =
-            SqliteStoreConfig::new(TMP_DIR.path().join("test_pool_size")).pool_max_size(42);
+            SqliteStoreConfig::new(TMP_DIR.path().join("test_pool_size")).pool_desired_size(42);
 
         let store = SqliteCryptoStore::open_with_config(&store_open_config).await.unwrap();
 
@@ -2361,7 +2360,7 @@ mod tests {
         };
         use ruma::{TransactionId, events::secret::request::SecretName, owned_user_id};
 
-        use crate::utils::{EncryptableStore, SqliteAsyncConnExt};
+        use crate::utils::{ConnectionExt, EncryptableStore};
 
         // Create a database with version 16
         let tmpdir = tempdir().unwrap();
@@ -2434,7 +2433,7 @@ mod tests {
         use matrix_sdk_crypto::{GossipRequest, SecretInfo};
         use ruma::{TransactionId, events::secret::request::SecretName, owned_user_id};
 
-        use crate::utils::{EncryptableStore, SqliteAsyncConnExt};
+        use crate::utils::{ConnectionExt, EncryptableStore};
 
         // Create a database with version 16
         let tmpdir = tempdir().unwrap();
