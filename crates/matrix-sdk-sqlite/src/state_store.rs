@@ -2,13 +2,12 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap},
     fmt, iter,
-    path::{Path, PathBuf},
+    path::Path,
     str::FromStr as _,
     sync::Arc,
 };
 
 use async_trait::async_trait;
-use deadpool::managed::PoolConfig;
 use matrix_sdk_base::{
     MinimalRoomMemberEvent, ROOM_VERSION_FALLBACK, ROOM_VERSION_RULES_FALLBACK, RoomInfo,
     RoomMemberships, RoomState, StateChanges, StateStore, StateStoreDataKey, StateStoreDataValue,
@@ -47,9 +46,7 @@ use tracing::{debug, instrument, warn};
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
-    connection::{
-        self, Connection as SqliteAsyncConn, Connections, MaybeConnections, Pool as SqlitePool,
-    },
+    connection::{self, Connection, Connections, MaybeConnections, Pool as SqlitePool, PoolConfig},
     error::{Error, Result},
     utils::{
         ConnectionExt, EncryptableStore, Key, KeyValueStoreConnectionExt,
@@ -84,9 +81,6 @@ pub struct SqliteStateStore {
 
     /// `Some` when active, `None` when closed.
     connections: Arc<MaybeConnections>,
-
-    /// Retained so we can rebuild the pool on reopen.
-    db_path: PathBuf,
 
     /// Retained so we can rebuild the pool on reopen.
     pool_config: PoolConfig,
@@ -125,12 +119,17 @@ impl SqliteStateStore {
     pub async fn open_with_config(config: &SqliteStoreConfig) -> Result<Self, OpenStoreError> {
         fs::create_dir_all(&config.path).await.map_err(OpenStoreError::CreateDir)?;
 
-        let pool = config.build_pool_of_connections(DATABASE_NAME)?;
-        let pool_config = config.pool_config;
+        let pool = config.build_pool_of_connections(DATABASE_NAME);
         let runtime_config = config.runtime_config;
 
-        let this =
-            Self::open_with_pool(pool, config.secret.clone(), pool_config, runtime_config).await?;
+        let this = Self::open_with_pool(
+            pool,
+            config.secret.clone(),
+            config.pool_config.clone(),
+            runtime_config,
+        )
+        .await?;
+
         this.read().await?.apply_runtime_config(runtime_config).await?;
 
         Ok(this)
@@ -144,7 +143,6 @@ impl SqliteStateStore {
         pool_config: PoolConfig,
         runtime_config: RuntimeConfig,
     ) -> Result<Self, OpenStoreError> {
-        let db_path = pool.manager().database_path.clone();
         let conn = pool.get().await?;
 
         let mut version = conn.db_version().await?;
@@ -167,7 +165,6 @@ impl SqliteStateStore {
                 })
                 .await,
             ),
-            db_path,
             pool_config,
             runtime_config,
         };
@@ -589,25 +586,23 @@ impl SqliteStateStore {
     /// Acquire a connection for executing read operations. Returns
     /// `StoreClosed` if closed.
     #[instrument(skip_all)]
-    async fn read(&self) -> Result<SqliteAsyncConn> {
-        let pool = {
+    async fn read(&self) -> Result<Connection> {
+        let new_read_connection = {
             let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
+            guard.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
         };
-        Ok(pool.get().await?)
+
+        Ok(new_read_connection)
     }
 
     /// Acquire a connection for executing write operations. Returns
     /// `StoreClosed` if closed.
     #[instrument(skip_all)]
-    async fn write(&self) -> Result<OwnedMutexGuard<SqliteAsyncConn>> {
-        let write_conn = {
+    async fn write(&self) -> Result<OwnedMutexGuard<Connection>> {
+        let write_connection = {
             let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.write_connection.clone()
+            guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.clone().lock_owned().await
         };
-        let connection = write_conn.lock_owned().await;
 
         // Specify a busy timeout so that operations are automatically retried,
         // in case the database was marked as locked, which can happen
@@ -616,9 +611,9 @@ impl SqliteStateStore {
         // The timeout value is in milliseconds.
         //
         // See also https://www.sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode.
-        connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
+        write_connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
 
-        Ok(connection)
+        Ok(write_connection)
     }
 
     fn remove_maybe_stripped_room_data(
@@ -639,8 +634,7 @@ impl SqliteStateStore {
     }
 
     pub async fn get_db_size(&self) -> Result<Option<usize>> {
-        let read_conn = self.read().await?;
-        Ok(Some(read_conn.get_db_size().await?))
+        Ok(Some(self.read().await?.get_db_size().await?))
     }
 }
 
@@ -651,7 +645,7 @@ impl EncryptableStore for SqliteStateStore {
 }
 
 /// Initialize the database.
-async fn init(conn: &SqliteAsyncConn) -> Result<()> {
+async fn init(conn: &Connection) -> Result<()> {
     // First turn on WAL mode, this can't be done in the transaction, it fails
     // with the error message: "cannot change into wal mode from within a
     // transaction".
@@ -1209,7 +1203,7 @@ trait SqliteObjectStateStoreExt: ConnectionExt {
 }
 
 #[async_trait]
-impl SqliteObjectStateStoreExt for SqliteAsyncConn {
+impl SqliteObjectStateStoreExt for Connection {
     async fn set_kv_blob(&self, key: Key, value: Vec<u8>) -> Result<()> {
         Ok(self.with_immediate_transaction(move |conn| conn.set_kv_blob(&key, &value)).await?)
     }
@@ -2658,12 +2652,10 @@ impl StateStore for SqliteStateStore {
     async fn reopen(&self) -> Result<(), Self::Error> {
         connection::reopen_connections(
             &self.connections,
-            self.db_path.clone(),
-            self.pool_config,
+            self.pool_config.clone(),
             self.runtime_config,
         )
-        .await?;
-        Ok(())
+        .await
     }
 }
 
@@ -2922,7 +2914,7 @@ mod encrypted_tests {
         let store = SqliteStateStore::open_with_config(&store_open_config).await.unwrap();
 
         let guard = store.connections.lock().await;
-        assert_eq!(guard.as_ref().unwrap().pool.status().max_size, 42);
+        assert_eq!(guard.as_ref().unwrap().pool.size(), 64);
     }
 
     #[async_test]
@@ -3052,8 +3044,7 @@ mod migration_tests {
 
         fs::create_dir_all(&config.path).await.map_err(OpenStoreError::CreateDir).unwrap();
 
-        let pool = config.build_pool_of_connections(DATABASE_NAME).unwrap();
-        let db_path = pool.manager().database_path.clone();
+        let pool = config.build_pool_of_connections(DATABASE_NAME);
         let conn = pool.get().await?;
 
         init(&conn).await?;
@@ -3072,8 +3063,7 @@ mod migration_tests {
                 })
                 .await,
             ),
-            db_path,
-            pool_config: deadpool::managed::PoolConfig::default(),
+            pool_config: config.pool_config.clone(),
             runtime_config: crate::RuntimeConfig::default(),
         };
         this.run_migrations(1, Some(version)).await?;

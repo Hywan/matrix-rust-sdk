@@ -127,9 +127,12 @@ impl SqliteStoreConfig {
     where
         P: AsRef<Path>,
     {
+        let path = path.as_ref().to_path_buf();
+
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.clone(),
             pool_config: PoolConfig {
+                database_path: path,
                 desired_size: max(POOL_MINIMUM_SIZE, num_cpus::get_physical() * 4),
             },
             runtime_config: RuntimeConfig::default(),
@@ -290,8 +293,8 @@ impl SqliteStoreConfig {
     }
 
     /// Returns the pool configuration.
-    pub(crate) fn pool_config(&self) -> PoolConfig {
-        self.pool_config
+    pub(crate) fn pool_config(&self) -> &PoolConfig {
+        &self.pool_config
     }
 
     /// Returns the runtime configuration.

@@ -26,8 +26,6 @@ use matrix_sdk_crypto::CryptoStoreError;
 use thiserror::Error;
 use tokio::io;
 
-use crate::connection::{CreatePoolError, PoolError};
-
 /// All the errors that can occur when opening an SQLite store.
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -36,9 +34,9 @@ pub enum OpenStoreError {
     #[error("Failed to create the database's parent directory: {0}")]
     CreateDir(#[source] io::Error),
 
-    /// Failed to create the DB pool.
-    #[error(transparent)]
-    CreatePool(#[from] CreatePoolError),
+    /// Failed to get a DB connection from the pool.
+    #[error("Failed to fetch an object from the pool")]
+    Pool(flaque::GetError<rusqlite::Error>),
 
     /// Failed to load the database's version.
     #[error("Failed to load database version: {0}")]
@@ -55,10 +53,6 @@ pub enum OpenStoreError {
     /// Failed to apply migrations.
     #[error("Failed to run migrations: {0}")]
     Migration(#[from] Error),
-
-    /// Failed to get a DB connection from the pool.
-    #[error(transparent)]
-    Pool(#[from] PoolError),
 
     /// Failed to initialize the store cipher.
     #[error("Failed to initialize the store cipher: {0}")]
@@ -81,8 +75,9 @@ pub enum Error {
     #[error("Failed to compute the maximum variable number from {0}")]
     SqliteMaximumVariableNumber(i32),
 
-    #[error(transparent)]
-    Pool(PoolError),
+    /// Failed to get a DB connection from the pool.
+    #[error("Failed to fetch an object from the pool")]
+    Pool(flaque::GetError<rusqlite::Error>),
 
     #[error(transparent)]
     Encode(rmp_serde::encode::Error),
@@ -128,7 +123,7 @@ pub enum Error {
 }
 
 macro_rules! impl_from {
-    ( $ty:ty => $enum:ident::$variant:ident ) => {
+    ( $ty:path => $enum:ident::$variant:ident ) => {
         impl From<$ty> for $enum {
             fn from(value: $ty) -> Self {
                 Self::$variant(value)
@@ -153,7 +148,8 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
-impl_from!(PoolError => Error::Pool);
+impl_from!(flaque::GetError<rusqlite::Error> => OpenStoreError::Pool);
+impl_from!(flaque::GetError<rusqlite::Error> => Error::Pool);
 impl_from!(rmp_serde::encode::Error => Error::Encode);
 impl_from!(rmp_serde::decode::Error => Error::Decode);
 impl_from!(matrix_sdk_store_encryption::Error => Error::Encryption);

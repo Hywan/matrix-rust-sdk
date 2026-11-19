@@ -16,12 +16,11 @@ use std::{
     collections::HashMap,
     fmt,
     ops::Deref,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, RwLock},
 };
 
 use async_trait::async_trait;
-use deadpool::managed::PoolConfig;
 use matrix_sdk_base::cross_process_lock::CrossProcessLockGeneration;
 use matrix_sdk_crypto::{
     Account, DeviceData, GossipRequest, GossippedSecret, SecretInfo, TrackedUser, UserIdentityData,
@@ -54,13 +53,11 @@ use zeroize::Zeroizing;
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
-    connection::{
-        self, Connection as SqliteAsyncConn, Connections, MaybeConnections, Pool as SqlitePool,
-    },
+    connection::{self, Connection, Connections, MaybeConnections, Pool, PoolConfig},
     error::{Error, Result},
     utils::{
         ConnectionExt, EncryptableStore, Key, KeyValueStoreConnectionExt,
-        KeyValueStoreSqliteConnectionExt, map_interact_err,
+        KeyValueStoreSqliteConnectionExt,
     },
 };
 
@@ -75,9 +72,6 @@ pub struct SqliteCryptoStore {
     /// `Some` when active, `None` when closed. The outer `Mutex` serialises
     /// close/reopen with connection access.
     connections: Arc<MaybeConnections>,
-
-    /// Retained so we can rebuild the pool on reopen.
-    db_path: PathBuf,
 
     /// Retained so we can rebuild the pool on reopen.
     pool_config: PoolConfig,
@@ -115,17 +109,15 @@ impl SqliteCryptoStore {
     /// - `conn` - The connection to use for writing to the store.
     pub(crate) async fn create_raw(
         secret: Option<Secret>,
-        pool: SqlitePool,
-        conn: SqliteAsyncConn,
-        pool_config: PoolConfig,
+        pool: Pool,
+        conn: Connection,
+        pool_config: &PoolConfig,
         runtime_config: RuntimeConfig,
     ) -> Result<Self, OpenStoreError> {
         let store_cipher = match secret {
             Some(s) => Some(Arc::new(conn.get_or_create_store_cipher(s).await?)),
             None => None,
         };
-
-        let db_path = pool.manager().database_path.clone();
 
         Ok(Self {
             store_cipher,
@@ -136,8 +128,7 @@ impl SqliteCryptoStore {
                 })
                 .await,
             ),
-            db_path,
-            pool_config,
+            pool_config: pool_config.clone(),
             runtime_config,
             static_account: Arc::new(RwLock::new(None)),
             save_changes_lock: Default::default(),
@@ -166,7 +157,7 @@ impl SqliteCryptoStore {
     pub async fn open_with_config(config: &SqliteStoreConfig) -> Result<Self, OpenStoreError> {
         fs::create_dir_all(&config.path).await.map_err(OpenStoreError::CreateDir)?;
 
-        let pool = config.build_pool_of_connections(DATABASE_NAME)?;
+        let pool = config.build_pool_of_connections(DATABASE_NAME);
         let pool_config = config.pool_config();
         let runtime_config = config.runtime_config();
 
@@ -180,9 +171,9 @@ impl SqliteCryptoStore {
     /// Create an SQLite-based crypto store using the given SQLite database
     /// pool. The given secret will be used to encrypt private data.
     async fn open_with_pool(
-        pool: SqlitePool,
+        pool: Pool,
         secret: Option<Secret>,
-        pool_config: PoolConfig,
+        pool_config: &PoolConfig,
         runtime_config: RuntimeConfig,
     ) -> Result<Self, OpenStoreError> {
         let conn = pool.get().await?;
@@ -231,18 +222,18 @@ impl SqliteCryptoStore {
 
     /// Acquire a connection for executing read operations.
     #[instrument(skip_all)]
-    async fn read(&self) -> Result<SqliteAsyncConn> {
-        let pool = {
-            let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
+    async fn read(&self) -> Result<Connection> {
+        let new_read_connection = {
+            let connections = self.connections.lock().await;
+            connections.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
         };
-        Ok(pool.get().await?)
+
+        Ok(new_read_connection)
     }
 
     /// Acquire a connection for executing write operations.
     #[instrument(skip_all)]
-    pub(crate) async fn write(&self) -> Result<OwnedMutexGuard<SqliteAsyncConn>> {
+    pub(crate) async fn write(&self) -> Result<OwnedMutexGuard<Connection>> {
         let write_connection = {
             let guard = self.connections.lock().await;
             let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
@@ -277,7 +268,7 @@ const DEHYDRATED_DEVICE_PICKLE_KEY: &str = "dehydrated_device_pickle_key";
 ///
 /// - `conn` - The connection to use.
 /// - `version` - the current version of the database.
-pub(crate) async fn initialize_store(conn: &SqliteAsyncConn, version: u8) -> Result<u8> {
+pub(crate) async fn initialize_store(conn: &Connection, version: u8) -> Result<u8> {
     if version == 0 {
         debug!("Creating database");
     } else if version < DATABASE_VERSION {
@@ -1137,7 +1128,7 @@ trait SqliteObjectCryptoStoreExt: ConnectionExt {
 }
 
 #[async_trait]
-impl SqliteObjectCryptoStoreExt for SqliteAsyncConn {}
+impl SqliteObjectCryptoStoreExt for Connection {}
 
 #[async_trait]
 impl CryptoStore for SqliteCryptoStore {
@@ -1848,12 +1839,7 @@ impl CryptoStore for SqliteCryptoStore {
 
     async fn remove_custom_value(&self, key: &str) -> Result<()> {
         let key = key.to_owned();
-        self.write()
-            .await?
-            .interact(move |conn| conn.execute("DELETE FROM kv WHERE key = ?1", (&key,)))
-            .await
-            .map_err(map_interact_err)
-            .flatten()?;
+        self.write().await?.execute("DELETE FROM kv WHERE key = ?1", (key,)).await?;
         Ok(())
     }
 
@@ -1925,12 +1911,10 @@ impl CryptoStore for SqliteCryptoStore {
     async fn reopen(&self) -> Result<()> {
         connection::reopen_connections(
             &self.connections,
-            self.db_path.clone(),
-            self.pool_config,
+            self.pool_config.clone(),
             self.runtime_config,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     async fn get_size(&self) -> Result<Option<usize>, Self::Error> {
@@ -2000,7 +1984,7 @@ mod tests {
 
         let guard = store.connections.lock().await;
         let conns = guard.as_ref().unwrap();
-        assert_eq!(conns.pool.status().max_size, 42);
+        assert_eq!(conns.pool.size(), 64);
     }
 
     /// Test that we didn't regress in our storage layer by loading data from a
@@ -2365,7 +2349,7 @@ mod tests {
         // Create a database with version 16
         let tmpdir = tempdir().unwrap();
         let config = SqliteStoreConfig::new(tmpdir.path());
-        let pool = config.build_pool_of_connections(super::DATABASE_NAME).unwrap();
+        let pool = config.build_pool_of_connections(super::DATABASE_NAME);
         let conn = pool.get().await.unwrap();
         let version = super::initialize_store(&conn, 0).await.unwrap();
         let old_data_store = SqliteCryptoStore::create_raw(
@@ -2438,7 +2422,7 @@ mod tests {
         // Create a database with version 16
         let tmpdir = tempdir().unwrap();
         let config = SqliteStoreConfig::new(tmpdir.path());
-        let pool = config.build_pool_of_connections(super::DATABASE_NAME).unwrap();
+        let pool = config.build_pool_of_connections(super::DATABASE_NAME);
         let conn = pool.get().await.unwrap();
         let version = super::initialize_store(&conn, 0).await.unwrap();
         let old_data_store = SqliteCryptoStore::create_raw(

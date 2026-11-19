@@ -19,16 +19,22 @@ use std::{ops::Deref, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
 pub type SqliteConnection = rusqlite::Connection;
-pub type LockedSqliteConnection = Arc<Mutex<SqliteConnection>>;
+pub type LockedSqliteConnection = Mutex<SqliteConnection>;
 pub type Connection =
     flaque::Object<LockedSqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
 pub type Pool = flaque::Pool<LockedSqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
 
-/// Type representing a connection to SQLite from the [`Pool`].
-// pub type Connection = flaque::Object<SqliteConnection, flaque::Async<SqliteConnectionBuilder>>;
+fn check_send<T: Send>(_: T) {}
+fn check_sync<T: Sync>(_: T) {}
 
-#[derive(Clone, Copy, Debug)]
+fn foo(c: Connection) {
+    check_send(async { c });
+    // check_sync(async { c });
+}
+
+#[derive(Clone, Debug)]
 pub struct PoolConfig {
+    pub database_path: PathBuf,
     pub desired_size: usize,
 }
 
@@ -57,7 +63,7 @@ impl flaque::AsyncBuilder<LockedSqliteConnection> for SqliteConnectionBuilder {
             let conn = rusqlite::Connection::open(path)?;
             conn.execute_batch(&pragmas)?;
 
-            Ok(Arc::new(Mutex::new(conn)))
+            Ok(Mutex::new(conn))
         }
     }
 }
@@ -98,7 +104,7 @@ pub(crate) struct Connections {
     pub pool: Pool,
 
     /// The dedicated write connection.
-    pub write_connection: Connection,
+    pub write_connection: Arc<Mutex<Connection>>,
 }
 
 /// The wrapper holding the [`ConnectionsInner`] of a store.
@@ -192,7 +198,6 @@ pub(crate) async fn close_connections(connections: &MaybeConnections, label: &st
 /// Idempotent: if the store is already active this is a no-op.
 pub(crate) async fn reopen_connections(
     connections: &MaybeConnections,
-    db_path: PathBuf,
     pool_config: PoolConfig,
     runtime_config: crate::RuntimeConfig,
 ) -> crate::error::Result<()> {

@@ -16,7 +16,6 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     cmp::min,
-    future::ready,
     iter,
     ops::Deref,
 };
@@ -30,7 +29,6 @@ use rusqlite::{
     OptionalExtension, Params, Row, Statement, Transaction, TransactionBehavior, limits::Limit,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard};
 use tracing::{error, trace, warn};
 use vodozemac::base64_encode;
 use zeroize::Zeroize;
@@ -223,141 +221,6 @@ pub(crate) trait ConnectionExt {
             self.query_row("PRAGMA page_count;", (), |row| row.get::<_, usize>(0)).await?;
 
         Ok(total_pages * page_size)
-    }
-}
-
-trait Acquire {
-    type Output<'a>
-    where
-        Self: 'a;
-
-    fn acquire<'a>(&'a self) -> impl Future<Output = Self::Output<'a>> + Send;
-}
-
-/*
-impl<T> Acquire for Mutex<T> {
-    type Output<'a>
-        = MutexGuard<'a, T>
-    where
-        Self: 'a;
-
-    async fn acquire<'a>(&'a self) -> Self::Output<'a> {
-        self.lock().await
-    }
-}
-
-impl<T> Acquire for OwnedMutexGuard<T> {
-    type Output<'a>
-        = &'a OwnedMutexGuard<T>
-    where
-        Self: 'a;
-
-    fn acquire<'a>(&'a self) -> impl Future<Output = Self::Output<'a>> {
-        ready(self)
-    }
-}
-*/
-
-#[async_trait]
-impl ConnectionExt for OwnedMutexGuard<SqliteConnection> {
-    async fn execute<P>(
-        &self,
-        sql: impl AsRef<str> + Send + 'static,
-        params: P,
-    ) -> rusqlite::Result<usize>
-    where
-        P: Params + Send + 'static,
-    {
-        self.deref().execute(sql.as_ref(), params)
-    }
-
-    async fn execute_batch(&self, sql: impl AsRef<str> + Send + 'static) -> rusqlite::Result<()> {
-        todo!()
-    }
-
-    async fn prepare<T, F>(
-        &self,
-        sql: impl AsRef<str> + Send + 'static,
-        f: F,
-    ) -> rusqlite::Result<T>
-    where
-        T: Send + 'static,
-        F: FnOnce(Statement<'_>) -> rusqlite::Result<T> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn query_row<T, P, F>(
-        &self,
-        sql: impl AsRef<str> + Send + 'static,
-        params: P,
-        f: F,
-    ) -> rusqlite::Result<T>
-    where
-        T: Send + 'static,
-        P: Params + Send + 'static,
-        F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn query_one<T, P, F>(
-        &self,
-        sql: impl AsRef<str> + Send + 'static,
-        params: P,
-        f: F,
-    ) -> rusqlite::Result<T>
-    where
-        T: Send + 'static,
-        P: Params + Send + 'static,
-        F: FnOnce(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn query_many<T, P, F>(
-        &self,
-        sql: impl AsRef<str> + Send + 'static,
-        params: P,
-        f: F,
-    ) -> rusqlite::Result<Vec<T>>
-    where
-        T: Send + 'static,
-        P: Params + Send + 'static,
-        F: FnMut(&Row<'_>) -> rusqlite::Result<T> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn with_transaction<T, E, F>(&self, f: F) -> Result<T, E>
-    where
-        T: Send + 'static,
-        E: From<rusqlite::Error> + Send + 'static,
-        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn with_immediate_transaction<T, E, F>(&self, f: F) -> Result<T, E>
-    where
-        T: Send + 'static,
-        E: From<rusqlite::Error> + Send + 'static,
-        F: FnOnce(&Transaction<'_>) -> Result<T, E> + Send + 'static,
-    {
-        todo!()
-    }
-
-    async fn chunk_large_query_over<Query, Res>(
-        &self,
-        keys_to_chunk: Vec<Key>,
-        result_capacity: Option<usize>,
-        do_query: Query,
-    ) -> Result<Vec<Res>>
-    where
-        Res: Send + 'static,
-        Query: Fn(&Transaction<'_>, ChunkFromLargeQuery<Key>) -> Result<Vec<Res>> + Send + 'static,
-    {
-        todo!()
     }
 }
 

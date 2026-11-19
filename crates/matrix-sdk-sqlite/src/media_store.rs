@@ -17,7 +17,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
@@ -36,14 +36,15 @@ use matrix_sdk_base::{
 use matrix_sdk_store_encryption::StoreCipher;
 use ruma::{MilliSecondsSinceUnixEpoch, MxcUri, OwnedMxcUri, time::SystemTime};
 use rusqlite::{OptionalExtension, params_from_iter};
-use tokio::{fs, sync::OwnedMutexGuard};
+use tokio::{
+    fs,
+    sync::{Mutex, OwnedMutexGuard},
+};
 use tracing::{debug, instrument};
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
-    connection::{
-        self, Connection, Connections, MaybeConnections, Pool, PoolConfig, SqliteConnection,
-    },
+    connection::{self, Connection, Connections, MaybeConnections, Pool, PoolConfig},
     error::{Error, Result},
     utils::{
         ConnectionExt, EncryptableStore, KeyValueStoreConnectionExt,
@@ -70,9 +71,6 @@ pub struct SqliteMediaStore {
 
     /// `Some` when active, `None` when closed.
     connections: Arc<MaybeConnections>,
-
-    /// Retained so we can rebuild the pool on reopen.
-    db_path: PathBuf,
 
     /// Retained so we can rebuild the pool on reopen.
     pool_config: PoolConfig,
@@ -124,15 +122,13 @@ impl SqliteMediaStore {
 
         fs::create_dir_all(&config.path).await.map_err(OpenStoreError::CreateDir)?;
 
-        let db_path = config.path.join(DATABASE_NAME);
         let pool_config = config.pool_config();
         let runtime_config = config.runtime_config();
 
         let pool = config.build_pool_of_connections(DATABASE_NAME);
 
         let this =
-            Self::open_with_pool(pool, db_path, pool_config, runtime_config, config.secret.clone())
-                .await?;
+            Self::open_with_pool(pool, pool_config, runtime_config, config.secret.clone()).await?;
 
         // Apply runtime config on the write connection.
         this.read().await?.apply_runtime_config(runtime_config).await?;
@@ -144,8 +140,7 @@ impl SqliteMediaStore {
     /// The given passphrase will be used to encrypt private data.
     async fn open_with_pool(
         pool: Pool,
-        db_path: PathBuf,
-        pool_config: PoolConfig,
+        pool_config: &PoolConfig,
         runtime_config: RuntimeConfig,
         secret: Option<Secret>,
     ) -> Result<Self, OpenStoreError> {
@@ -169,14 +164,13 @@ impl SqliteMediaStore {
         let connections = Connections {
             pool,
             // Use `conn` as our selected write connection.
-            write_connection: conn,
+            write_connection: Arc::new(Mutex::new(conn)),
         };
 
         Ok(Self {
             store_cipher,
             connections: Arc::new(MaybeConnections::new(connections).await),
-            db_path,
-            pool_config,
+            pool_config: pool_config.clone(),
             runtime_config,
             media_service,
         })
@@ -201,10 +195,10 @@ impl SqliteMediaStore {
 
     // Acquire a connection for executing write operations.
     #[instrument(skip_all)]
-    async fn write(&self) -> Result<OwnedMutexGuard<SqliteConnection>> {
+    async fn write(&self) -> Result<OwnedMutexGuard<Connection>> {
         let write_connection = {
             let guard = self.connections.lock().await;
-            guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.lock_owned().await
+            guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.clone().lock_owned().await
         };
 
         // Specify a busy timeout so that operations are automatically retried,
@@ -214,29 +208,24 @@ impl SqliteMediaStore {
         // The timeout value is in milliseconds.
         //
         // See also https://www.sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode.
-        write_connection.execute_batch("PRAGMA busy_timeout = 2000;")?;
+        write_connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
 
         // Per https://www.sqlite.org/foreignkeys.html#fk_enable, foreign key
         // support must be enabled on a per-connection basis. Execute it every
         // time we try to get a connection, since we can't guarantee a previous
         // connection did enable it before.
-        write_connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        write_connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
 
         Ok(write_connection)
     }
 
     pub async fn vacuum(&self) -> Result<()> {
         let guard = self.connections.lock().await;
-        guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.vacuum().await
+        guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.lock().await.vacuum().await
     }
 
     async fn get_db_size(&self) -> Result<Option<usize>> {
-        let new_read_connection = {
-            let connections = self.connections.lock().await;
-            connections.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
-        };
-
-        Ok(Some(new_read_connection.get_db_size().await?))
+        Ok(Some(self.read().await?.get_db_size().await?))
     }
 
     pub async fn close(&self) -> Result<()> {
@@ -247,12 +236,10 @@ impl SqliteMediaStore {
     pub async fn reopen(&self) -> Result<()> {
         connection::reopen_connections(
             &self.connections,
-            self.db_path.clone(),
-            self.pool_config,
+            self.pool_config.clone(),
             self.runtime_config,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Returns the pool size status, for testing purposes.
@@ -374,7 +361,8 @@ impl MediaStore for SqliteMediaStore {
         conn.execute(
             r#"UPDATE media SET uri = ?, format = ? WHERE uri = ? AND format = ?"#,
             (new_uri, new_format, prev_uri, prev_format),
-        )?;
+        )
+        .await?;
 
         Ok(())
     }
@@ -394,7 +382,7 @@ impl MediaStore for SqliteMediaStore {
         let format = self.encode_key(keys::MEDIA, request.format.unique_key());
 
         let conn = self.write().await?;
-        conn.execute("DELETE FROM media WHERE uri = ? AND format = ?", (uri, format))?;
+        conn.execute("DELETE FROM media WHERE uri = ? AND format = ?", (uri, format)).await?;
 
         Ok(())
     }

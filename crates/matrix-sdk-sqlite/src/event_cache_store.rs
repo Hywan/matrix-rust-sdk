@@ -19,12 +19,11 @@ use std::{
     fmt,
     iter::once,
     ops::{Deref, Not},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
 use async_trait::async_trait;
-use deadpool::managed::PoolConfig;
 use matrix_sdk_base::{
     cross_process_lock::CrossProcessLockGeneration,
     deserialized_responses::TimelineEvent,
@@ -52,9 +51,7 @@ use tracing::{debug, error, instrument, trace};
 
 use crate::{
     OpenStoreError, RuntimeConfig, Secret, SqliteStoreConfig,
-    connection::{
-        self, Connection as SqliteAsyncConn, Connections, MaybeConnections, Pool as SqlitePool,
-    },
+    connection::{self, Connection, Connections, MaybeConnections, Pool as SqlitePool, PoolConfig},
     error::{Error, Result},
     utils::{
         ConnectionExt, EncryptableStore, Key, KeyValueStoreConnectionExt,
@@ -176,9 +173,6 @@ pub struct SqliteEventCacheStore {
     connections: Arc<MaybeConnections>,
 
     /// Retained so we can rebuild the pool on reopen.
-    db_path: PathBuf,
-
-    /// Retained so we can rebuild the pool on reopen.
     pool_config: PoolConfig,
 
     /// Retained so we can re-apply runtime config on reopen.
@@ -220,14 +214,13 @@ impl SqliteEventCacheStore {
 
         fs::create_dir_all(&config.path).await.map_err(OpenStoreError::CreateDir)?;
 
-        let db_path = config.path.join(DATABASE_NAME);
         let pool_config = config.pool_config();
         let runtime_config = config.runtime_config();
 
-        let pool = config.build_pool_of_connections(DATABASE_NAME)?;
+        let pool = config.build_pool_of_connections(DATABASE_NAME);
 
         let this =
-            Self::open_with_pool(pool, db_path, pool_config, runtime_config, config.secret.clone())
+            Self::open_with_pool(pool, pool_config.clone(), runtime_config, config.secret.clone())
                 .await?;
 
         // Apply runtime config on the write connection.
@@ -240,7 +233,6 @@ impl SqliteEventCacheStore {
     /// pool. The given secret will be used to encrypt private data.
     async fn open_with_pool(
         pool: SqlitePool,
-        db_path: PathBuf,
         pool_config: PoolConfig,
         runtime_config: RuntimeConfig,
         secret: Option<Secret>,
@@ -267,7 +259,6 @@ impl SqliteEventCacheStore {
         Ok(Self {
             encryption: Arc::new(Encryption { cipher }),
             connections: Arc::new(MaybeConnections::new(connections).await),
-            db_path,
             pool_config,
             runtime_config,
         })
@@ -275,34 +266,28 @@ impl SqliteEventCacheStore {
 
     /// Acquire a connection for executing read operations.
     #[instrument(skip_all)]
-    async fn read(&self) -> Result<SqliteAsyncConn> {
-        let pool = {
+    async fn read(&self) -> Result<Connection> {
+        let new_read_connection = {
             let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
+            guard.as_ref().ok_or(Error::StoreClosed)?.pool.get().await?
         };
-
-        let connection = pool.get().await?;
 
         // Per https://www.sqlite.org/foreignkeys.html#fk_enable, foreign key
         // support must be enabled on a per-connection basis. Execute it every
         // time we try to get a connection, since we can't guarantee a previous
         // connection did enable it before.
-        connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
+        new_read_connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
 
-        Ok(connection)
+        Ok(new_read_connection)
     }
 
     /// Acquire a connection for executing write operations.
     #[instrument(skip_all)]
-    async fn write(&self) -> Result<OwnedMutexGuard<SqliteAsyncConn>> {
+    async fn write(&self) -> Result<OwnedMutexGuard<Connection>> {
         let write_connection = {
             let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.write_connection.clone()
+            guard.as_ref().ok_or(Error::StoreClosed)?.write_connection.clone().lock_owned().await
         };
-
-        let connection = write_connection.lock_owned().await;
 
         // Specify a busy timeout so that operations are automatically retried,
         // in case the database was marked as locked, which can happen
@@ -311,15 +296,15 @@ impl SqliteEventCacheStore {
         // The timeout value is in milliseconds.
         //
         // See also https://www.sqlite.org/wal.html#sometimes_queries_return_sqlite_busy_in_wal_mode.
-        connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
+        write_connection.execute_batch("PRAGMA busy_timeout = 2000;").await?;
 
         // Per https://www.sqlite.org/foreignkeys.html#fk_enable, foreign key
         // support must be enabled on a per-connection basis. Execute it every
         // time we try to get a connection, since we can't guarantee a previous
         // connection did enable it before.
-        connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
+        write_connection.execute_batch("PRAGMA foreign_keys = ON;").await?;
 
-        Ok(connection)
+        Ok(write_connection)
     }
 
     fn map_row_to_chunk(
@@ -343,12 +328,7 @@ impl SqliteEventCacheStore {
     }
 
     async fn get_db_size(&self) -> Result<Option<usize>> {
-        let pool = {
-            let guard = self.connections.lock().await;
-            let conns = guard.as_ref().ok_or(Error::StoreClosed)?;
-            conns.pool.clone()
-        };
-        Ok(Some(pool.get().await?.get_db_size().await?))
+        Ok(Some(self.read().await?.get_db_size().await?))
     }
 
     pub async fn close(&self) -> Result<()> {
@@ -359,19 +339,17 @@ impl SqliteEventCacheStore {
     pub async fn reopen(&self) -> Result<()> {
         connection::reopen_connections(
             &self.connections,
-            self.db_path.clone(),
-            self.pool_config,
+            self.pool_config.clone(),
             self.runtime_config,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Returns the pool size status, for testing purposes.
     #[cfg(test)]
     async fn pool_max_size(&self) -> Option<usize> {
         let guard = self.connections.lock().await;
-        guard.as_ref().map(|conns| conns.pool.status().max_size)
+        guard.as_ref().map(|conns| conns.pool.size())
     }
 }
 
@@ -495,7 +473,7 @@ impl TransactionExtForLinkedChunks for Transaction<'_> {
 }
 
 /// Run migrations for the given version of the database.
-async fn run_migrations(conn: &SqliteAsyncConn, version: u8) -> Result<()> {
+async fn run_migrations(conn: &Connection, version: u8) -> Result<()> {
     // Always enable foreign keys for the current connection.
     conn.execute_batch("PRAGMA foreign_keys = ON;").await?;
 
